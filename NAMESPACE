@@ -1,0 +1,30 @@
+useDynLib(landisR.harvest, .registration=TRUE)
+importFrom(Rcpp, evalCpp)
+export(harvest_apply_cells)
+export(harvest_prepare_management)
+export(harvest_plan_complete)
+export(harvest_complete)
+export(harvest_plan)
+export(harvest_complete_b2)
+export(harvest_plan_c2)
+export(harvest_complete_c2)
+export(harvest_plan_c3)
+export(harvest_complete_c3)
+
+export(harvest_prepare_adjacency_d2)
+export(harvest_plan_d2)
+export(harvest_step_d2)
+
+export(harvest_plan_e2)
+export(harvest_step_e2)
+
+export(harvest_plan_e3)
+export(harvest_step_e3)
+
+export(harvest_plan_e4d)
+export(harvest_step_e4d)
+
+export(harvest_prepare)
+export(harvest_plan_prescriptions)
+export(harvest_step)
+export(harvest_extension)

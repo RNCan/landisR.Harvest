@@ -1,0 +1,31 @@
+\name{harvest_plan_c3}
+\alias{harvest_plan_c3}
+\alias{harvest_complete_c3}
+\title{Pilot LANDIS-II v7 Random stand ranking with an explicit MT19937 stream}
+\usage{
+harvest_plan_c3(simulation, topology, targets, economic = NULL,
+  forest_type = NULL, allocation_mode = c("corrected", "landis_compatible"),
+  landis_seed, landis_rng_offset = 0)
+
+harvest_complete_c3(simulation, topology, targets, economic = NULL,
+  forest_type = NULL, allocation_mode = c("corrected", "landis_compatible"),
+  landis_seed, landis_rng_offset = 0)
+}
+\arguments{
+  \item{simulation}{An existing landisR simulation with a shared live CSR state.}
+  \item{topology}{Topology created by \code{harvest_prepare_management}.}
+  \item{targets}{A data frame with one row per management area; columns \code{management_area}, \code{fraction}, \code{ranking}, \code{target_type} and optional eligibility criteria. Ranking is one of \code{Random}, \code{MaxCohortAge}, \code{Economic}, \code{RegulateAges}.}
+  \item{economic}{Optional table for the Economic ranking.}
+  \item{forest_type}{Optional table for ForestTypeTable eligibility.}
+  \item{allocation_mode}{Allocation and ForestTypeTable interpretation.}
+  \item{landis_seed}{Seed for the LANDIS-II v7 32-bit MT19937 generator.}
+  \item{landis_rng_offset}{Number of draws already consumed by the \emph{same} external LANDIS-II generator. It must be accurately supplied for coupled simulations.}
+}
+\description{
+  Reproduces the Random stand-ranking and selection sequence in H04-C3a benchmark scenarios using LANDIS-II v7 MT19937 and the core's shuffle-with-removal algorithm.
+}
+\details{
+  This is an isolated pilot for SiteSelection Complete and CohortsRemoved ClearCut. The external RNG is NOT automatically connected to Biomass Succession, Base Fire or other perturbations, and the returned \code{landis_rng$next_offset} does not mutate the landisR simulation RNG. Exact parity of full coupled simulations requires a single shared RNG state and the exact order of draws across components.
+  One random draw per harvested stand is modeled for the H04-C3a one-cell Complete fixtures, as observed in the LANDIS-II binaries. More complicated spatial selection methods remain to be qualified.
+}
+\value{\code{harvest_plan_c3} returns a plan with stand ranks, selected cells, management-area statistics and \code{landis_rng} offsets. \code{harvest_complete_c3} also applies the harvest to a new live CSR state and returns the plan and effects.}
