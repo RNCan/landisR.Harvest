@@ -7,6 +7,7 @@ harvest_plan_e3 <- function(simulation, topology, prescriptions,
                             landis_seed, landis_rng_offset=0,
                             allocation_mode=c("corrected","landis_compatible")) {
   .h04_sim(simulation)
+  forest <- landisR::landis_csr(simulation)
   allocation_mode <- match.arg(allocation_mode)
   valid_num <- function(x,lo,hi) is.numeric(x)&&length(x)==1L&&
     !is.na(x)&&is.finite(x)&&x>=lo&&x<=hi&&x==trunc(x)
@@ -15,7 +16,7 @@ harvest_plan_e3 <- function(simulation, topology, prescriptions,
   if(!valid_num(landis_rng_offset,0,1e9))stop("Invalid landis_rng_offset",call.=FALSE)
   if(!valid_num(year,0,1e9))stop("Invalid harvest year",call.=FALSE)
   if(is.null(topology$d2_neighbors)||!inherits(topology,"landisR_h04_topology")||
-     !identical(topology$ids,as.integer(simulation$ctx$ids)))
+     !identical(topology$ids,as.integer(forest$cell_id)))
     stop("Call harvest_prepare_adjacency_d2(simulation,topology) first",call.=FALSE)
   required<-c("management_area","prescription","fraction","ranking","target_type",
     "minimum_age","maximum_age","begin_time","end_time","site_selection")
@@ -55,7 +56,7 @@ harvest_plan_e3 <- function(simulation, topology, prescriptions,
   if(anyNA(key)||any(!key%in%names(codes))||any(threshold>0L & key=="none"))
     stop("Active stand adjacency requires StandAge or TimeSinceLastHarvested",call.=FALSE)
   kind<-as.integer(unname(codes[key]))
-  species_names<-as.character(simulation$ctx$config$species$species)
+  species_names<-as.character(forest$species)
   forest_species<-if("forest_type_species"%in%names(p))
     as.character(p$forest_type_species) else rep(NA_character_,nrow(p))
   if(length(forest_species)!=nrow(p))stop("Invalid forest_type_species",call.=FALSE)
@@ -92,7 +93,7 @@ harvest_plan_e3 <- function(simulation, topology, prescriptions,
     forest_species=as.integer(forest_index),forest_min_age=as.integer(forest_lo),
     forest_max_age=as.integer(forest_hi),forest_percent=as.numeric(forest_pct))
   # One batched native pass over all existing shared living CSR states.
-  nat<-.Call("h04e3_plan",simulation$states,simulation$cell_state,
+  nat<-.Call("h04e3_plan",forest$states,forest$cell_state,
     topology$positions,topology$stand_offsets,topology$ma_offsets,
     topology$d2_neighbors$offsets,topology$d2_neighbors$indices,
     topology$d2_neighbors$first_position,cfg,last,

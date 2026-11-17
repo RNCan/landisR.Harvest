@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <vector>
 #include "management_e2_math.hpp"
@@ -57,11 +58,24 @@ struct Result {
   double current_rank = 0;
   std::vector<int> damage_year;
 };
+// Each prescription stores entries only for stands in its own area.
+inline std::vector<std::size_t> prescription_offsets(
+    const std::vector<int>& management_offsets, const std::vector<Prescription>& prescriptions) {
+  std::vector<std::size_t> offsets(prescriptions.size() + 1, 0);
+  for (std::size_t j = 0; j < prescriptions.size(); ++j) {
+    const int m = prescriptions[j].ma;
+    if (m < 0 || static_cast<std::size_t>(m) >= management_offsets.size() - 1 ||
+        management_offsets[m] > management_offsets[m + 1])
+      throw std::runtime_error("Invalid prescription management area");
+    offsets[j + 1] = offsets[j] + management_offsets[m + 1] - management_offsets[m];
+  }
+  return offsets;
+}
 inline Result select(
   const std::vector<int>& so,const std::vector<int>& mo,
   const std::vector<int>& no,const std::vector<int>& ni,
   const std::vector<int>& first,const std::vector<int>& age,
-  const std::vector<double>& input_ranks, const std::vector<unsigned char>& qualifies,
+  std::vector<double> ranks, const std::vector<unsigned char>& qualifies,
   const std::vector<Prescription>& ps, const std::vector<int>& last,
   int year, h04c3::Stream& rng,
   const std::vector<int>& effective_sites = {}, double cell_area_ha = 1.0,
@@ -69,15 +83,15 @@ inline Result select(
   const std::vector<double>& reserve_until = {},
   const RepeatPlan& repeat = {}, DamageHistory damage = {},
   const std::vector<int>& listed_sites = {}) {
-  // matrices 'ranks' and 'qualifies': prescription-major, i.e. j*ns+s.
+  const auto offsets = prescription_offsets(mo, ps);
   const int ns=static_cast<int>(so.size())-1,nm=static_cast<int>(mo.size())-1,np=static_cast<int>(ps.size());
   if(ns<1||nm<1||np<1||so[0]!=0||mo[0]!=0||mo[nm]!=ns||
       no.size()!=so.size()||no[0]!=0||no[ns]!=static_cast<int>(ni.size())||
       first.size()!=static_cast<std::size_t>(ns)||age.size()!=static_cast<std::size_t>(ns)||
-      input_ranks.size()!=static_cast<std::size_t>(ns*np)||qualifies.size()!=static_cast<std::size_t>(ns*np)||
+      ranks.size()!=offsets.back()||qualifies.size()!=offsets.back()||
       last.size()!=static_cast<std::size_t>(ns)||year<0||
       !std::isfinite(cell_area_ha)||cell_area_ha<=0||
-    (!effective_sites.empty() && effective_sites.size()!=input_ranks.size()) ||
+    (!effective_sites.empty() && effective_sites.size()!=ranks.size()) ||
     (!reserve_until.empty() && reserve_until.size()!=static_cast<std::size_t>(ns)))
     throw std::runtime_error("invalid E3 landscape/plan dimensions");
   Result out;out.last_harvest=last;out.allocated.assign(np,0);out.attempted.assign(np,0);out.eligible.assign(np,0);out.total_sites.assign(nm,0);
@@ -110,7 +124,7 @@ inline Result select(
   for(int n:ni)if(n<0||n>=ns)throw std::runtime_error("invalid E3 neighbor index");
   for(const auto &p:ps){
     if(p.ma<0||p.ma>=nm||p.min_age<0||p.max_age<p.min_age||p.first<0||p.last<p.first||
-      p.adjacent_limit<0||p.adjacent_type<0||p.adjacent_type>2||p.min_harvest_gap<0||p.ranking<0||p.ranking>1||
+      p.adjacent_limit<0||p.adjacent_type<0||p.adjacent_type>2||p.min_harvest_gap<0||p.ranking<0||p.ranking>2||
       p.target_fraction<0||p.target_fraction>1||!std::isfinite(p.target_fraction)||
       (p.spread && (!std::isfinite(p.min_block_ha)||!std::isfinite(p.max_block_ha)||
                     p.min_block_ha<0||p.max_block_ha<=0||p.max_block_ha<p.min_block_ha)) ||
@@ -126,7 +140,10 @@ inline Result select(
     if(mo[m]>=mo[m+1])throw std::runtime_error("empty management area");
     for(int s=mo[m];s<mo[m+1];++s)out.total_sites[m]+=so[s+1]-so[s];
   }
-  std::vector<double> ranks=input_ranks;
+  std::vector<std::vector<int>> prescriptions_by_area(nm);
+  for (int j = 0; j < np; ++j)
+    if (ps[j].target_fraction > 0 && year >= ps[j].first && year <= ps[j].last)
+      prescriptions_by_area[ps[j].ma].push_back(j);
   std::vector<unsigned char> used(ns,0);
   std::vector<std::size_t> seen;
   std::vector<int> frontier, block;
@@ -164,24 +181,25 @@ inline Result select(
     // uniform random permutation of all stands in this MA, in raster order.
     // This is NOT a claim of event-by-event .NET RNG stream equivalence.
     std::vector<int> raster;
-    for(int s=mo[m];s<mo[m+1];++s)raster.push_back(s);
-    std::sort(raster.begin(),raster.end(),[&](int a,int b){return first[a]<first[b];});
-    for(int j=0;j<np;++j){
-      const auto &p=ps[j];
-      if(p.ma!=m||p.ranking!=1||p.target_fraction==0||year<p.first||year>p.last)continue;
+    for (int j : prescriptions_by_area[m]) {
+      if (ps[j].ranking != 1) continue;
+      if (raster.empty()) {
+        raster.resize(mo[m + 1] - mo[m]);
+        std::iota(raster.begin(), raster.end(), mo[m]);
+        std::sort(raster.begin(), raster.end(), [&](int a, int b) { return first[a] < first[b]; });
+      }
       auto permutation=h04c3::landis_shuffle_ranks(static_cast<int>(raster.size()),rng);
-      for(std::size_t k=0;k<raster.size();++k)ranks[j*ns+raster[k]]=permutation[k];
+      for(std::size_t k=0;k<raster.size();++k)ranks[offsets[j] + (raster[k] - mo[m])]=permutation[k];
     }
     std::vector<int> active;
     std::vector<std::vector<int>> ordered;
     std::vector<std::vector<unsigned char>> spread_eligibility;
     std::vector<double> goals;
-    for(int j=0;j<np;++j){
+    for (int j : prescriptions_by_area[m]) {
       const auto &p=ps[j];
-      if(p.ma!=m||p.target_fraction==0||year<p.first||year>p.last)continue;
       std::vector<int> candidates;
       for(int s=mo[m];s<mo[m+1];++s){
-        int ix=j*ns+s;
+        const auto ix = offsets[j] + (s - mo[m]);
         if(reserved(s)||!qualifies[ix]||ranks[ix]<=0||!std::isfinite(ranks[ix])||
            age[s]<p.min_age||age[s]>p.max_age)continue;
         if(last[s]>=0&&year-last[s]<p.min_harvest_gap)continue;
@@ -197,7 +215,7 @@ inline Result select(
         if(ok)candidates.push_back(s);
       }
       std::sort(candidates.begin(),candidates.end(),[&](int a,int b){
-        if(ranks[j*ns+a]!=ranks[j*ns+b])return ranks[j*ns+a]>ranks[j*ns+b];
+        if(ranks[offsets[j] + (a - mo[m])]!=ranks[offsets[j] + (b - mo[m])])return ranks[offsets[j] + (a - mo[m])]>ranks[offsets[j] + (b - mo[m])];
         return first[a]<first[b];
       });
       out.eligible[j]=candidates.size();
@@ -326,7 +344,7 @@ inline Result select(
         }
         auto &eligible=spread_eligibility[kchosen];
         const auto lower_priority=[&](int a,int b){
-          if(ranks[j*ns+a]!=ranks[j*ns+b]) return ranks[j*ns+a]<ranks[j*ns+b];
+          if(ranks[offsets[j] + (a - mo[m])]!=ranks[offsets[j] + (b - mo[m])]) return ranks[offsets[j] + (a - mo[m])]<ranks[offsets[j] + (b - mo[m])];
           return first[a]>first[b];
         };
         // A block grows through the highest ranked neighbor of any
@@ -409,7 +427,7 @@ inline Result select(
         subset = &filtered_cells;
       }
       ++event_id;
-      current_rank = ranks[j*ns+initial];
+      current_rank = ranks[offsets[j] + (initial - mo[m])];
       RepeatJob scheduled{j, year, 1, event_id, current_rank, {}, {}};
       bool has_cut = false;
       // Every member in a committed block is already selected when the
@@ -421,7 +439,7 @@ inline Result select(
         const int stand_sites=stand_size(stand);
         const auto cell_begin=out.selected_cells.size();
         int attempted=stand_sites;
-        int credit=effective_sites.empty() ? stand_sites : effective_sites[j*ns+stand];
+        int credit=effective_sites.empty() ? stand_sites : effective_sites[offsets[j] + (stand - mo[m])];
         if(subset){
           const auto start=i==0 ? 0 : cell_ends[i-1];
           const auto end=cell_ends[i];
@@ -467,7 +485,7 @@ inline Result select(
         }
         out.attempted[j]+=attempted;
         out.allocated[j]+=credit;
-        out.events.push_back({stand,j,m,age[stand],stand_sites,event_id,ranks[j*ns+stand],
+        out.events.push_back({stand,j,m,age[stand],stand_sites,event_id,ranks[offsets[j] + (stand - mo[m])],
                               draw,u,weights[kchosen]/total,cell_begin,out.selected_cells.size()});
       }
       if (has_cut) enqueue(std::move(scheduled));

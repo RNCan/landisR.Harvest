@@ -4,9 +4,10 @@
 harvest_plan <- function(simulation, topology, targets, economic=NULL,
                          allocation_mode=c("corrected","landis_compatible")) {
   .h04_sim(simulation)
+  forest <- landisR::landis_csr(simulation)
   allocation_mode <- match.arg(allocation_mode)
   if (!inherits(topology,"landisR_h04_topology") ||
-      !identical(topology$ids,as.integer(simulation$ctx$ids)))
+      !identical(topology$ids,as.integer(forest$cell_id)))
     stop("Topology does not match active cell IDs/order",call.=FALSE)
   if (!is.data.frame(targets) ||
       !all(c("management_area","fraction","minimum_age","ranking","target_type") %in% names(targets)))
@@ -30,7 +31,7 @@ harvest_plan <- function(simulation, topology, targets, economic=NULL,
      (anyNA(targets$cohorts_removed)||any(targets$cohorts_removed != "ClearCut")))
     stop("H04-B2 supports ClearCut only",call.=FALSE)
   order_ma <- match(topology$management_areas,ma)
-  species <- as.character(simulation$ctx$config$species$species)
+  species <- as.character(forest$species)
   nma <- length(order_ma);nsp <- length(species)
   weights <- matrix(0,nrow=nma,ncol=nsp)
   merchant <- matrix(1L,nrow=nma,ncol=nsp) # unused species have zero economic rank
@@ -62,7 +63,7 @@ harvest_plan <- function(simulation, topology, targets, economic=NULL,
     }
   }
   rn <- ranking[order_ma]; tn <- target_type[order_ma]
-  native <- .Call("h04b2_plan",simulation$states,as.integer(simulation$cell_state),
+  native <- .Call("h04b2_plan",forest$states,as.integer(forest$cell_state),
     topology$positions,topology$stand_offsets,topology$ma_offsets,
     weights,merchant,as.integer(match(rn,c("MaxCohortAge","Economic"))-1L),
     as.numeric(f[order_ma]),minimum[order_ma],

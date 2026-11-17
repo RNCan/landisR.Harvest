@@ -1,13 +1,24 @@
 Package: landisR.harvest
 Type: Package
 Title: Experimental Native Living Biomass Harvest for landisR
-Version: 0.0.0.9024
+Version: 0.0.0.9028
 Authors@R: person("LANDIS-R", "Development", email="landisR-maintainer@example.invalid", role=c("aut","cre"))
-Description: Experimental native living-cohort removal and deterministic whole-stand allocation using the shared CSR forest state of landisR. H04-C2 adds deterministic RegulateAges, inclusive MaximumAge and ForestTypeTable. H04-C3b adds a separate seed-plus-offset MT19937 Random pilot, with exact historical results in selected LANDIS-II v7 fixtures. Full shared RNG coupling and other LANDIS-II modules remain in qualification. H04-D2 adds sparse rook neighbor topology and sequential MA harvest history for SiteSelection Complete. H04-E2 adds multi-prescription weighted stochastic selection and one RNG draw per harvest event for Complete site-selection. H04-D2 remains a frozen regression reference; stochastic multi-annual coupled RNG remains to be qualified. H04-E3 adds an experimental fused CSR native pilot for mixed MaxCohortAge Complete prescriptions with per-prescription adjacency, harvest history, and one Required ForestType rule; only first-step deterministic-ranking references are targeted. H04-E4b fixes ForestType validation after an expected species goes locally or globally absent: fixed catalog replaces the live CSR maximum ID. H04-E4d adds experimental uniform Random ranking within mixed Complete prescriptions and sparse no-effect EventLog semantics with ecological, not seed-identity, validation. H04-E4g credits only sites with positive biomass removal toward Complete area quotas when treatment rules are supplied. Adds CompleteStandSpread, PartialStandSpread and PatchCutting to the native area-quota planner. Adds configurable neighboring-stand set-aside and scheduled repeat harvests. Supports cell-level minimum time since damage.
+Description: Experimental native living-cohort removal and deterministic whole-stand allocation using the shared CSR forest state of landisR. H04-C2 adds deterministic
+                  RegulateAges, inclusive MaximumAge and ForestTypeTable. H04-C3b adds a separate seed-plus-offset MT19937 Random pilot, with exact historical results
+                  in selected LANDIS-II v7 fixtures. Full shared RNG coupling and other LANDIS-II modules remain in qualification. H04-D2 adds sparse rook neighbor
+                  topology and sequential MA harvest history for SiteSelection Complete. H04-E2 adds multi-prescription weighted stochastic selection and one RNG draw
+                  per harvest event for Complete site-selection. H04-D2 remains a frozen regression reference; stochastic multi-annual coupled RNG remains to be
+                  qualified. H04-E3 adds an experimental fused CSR native pilot for mixed MaxCohortAge Complete prescriptions with per-prescription adjacency, harvest
+                  history, and one Required ForestType rule; only first-step deterministic-ranking references are targeted. H04-E4b fixes ForestType validation after
+                  an expected species goes locally or globally absent: fixed catalog replaces the live CSR maximum ID. H04-E4d adds experimental uniform Random ranking
+                  within mixed Complete prescriptions and sparse no-effect EventLog semantics with ecological, not seed-identity, validation. H04-E4g credits only
+                  sites with positive biomass removal toward Complete area quotas when treatment rules are supplied. Adds CompleteStandSpread, PartialStandSpread and
+                  PatchCutting to the native area-quota planner. Adds configurable neighboring-stand set-aside and scheduled repeat harvests. Supports cell-level
+                  minimum time since damage.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 4.3.0)
-Imports: Rcpp, landisR (>= 0.1.0.9008)
+Imports: landisR (>= 0.1.0.9011), Rcpp
 LinkingTo: Rcpp, landisR
 SystemRequirements: C++17
 NeedsCompilation: yes

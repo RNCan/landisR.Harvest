@@ -1,8 +1,9 @@
 # Static geometry is cached by harvest_extension() and may also be prepared
 # explicitly for repeated calls to harvest_step().
 .harvest_prepare_cell_topology <- function(simulation, topology) {
+  forest <- landisR::landis_csr(simulation)
   topology$partial_neighbors <- .Call("h05_cell_topology", topology$ids, topology$positions,
-    topology$stand_offsets, as.integer(c(simulation$ctx$nrow, simulation$ctx$ncol)),
+    topology$stand_offsets, as.integer(c(forest$nrow, forest$ncol)),
     PACKAGE="landisR.harvest")
   topology
 }
@@ -19,6 +20,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
                             rules_by_prescription=NULL,
                             harvest_timestep=simulation$project$canonical$timestep, damage_history=NULL) {
   .h04_sim(simulation)
+  forest <- landisR::landis_csr(simulation)
   allocation_mode <- match.arg(allocation_mode)
   valid_num <- function(x,lo,hi) is.numeric(x)&&length(x)==1L&&
     !is.na(x)&&is.finite(x)&&x>=lo&&x<=hi&&x==trunc(x)
@@ -36,7 +38,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
   }
   if(!valid_num(year,0,1e9))stop("Invalid harvest year",call.=FALSE)
   if(is.null(topology$d2_neighbors)||!inherits(topology,"landisR_h04_topology")||
-     !identical(topology$ids,as.integer(simulation$ctx$ids)))
+     !identical(topology$ids,as.integer(forest$cell_id)))
     stop("Call harvest_prepare_adjacency_d2(simulation,topology) first",call.=FALSE)
   required<-c("management_area","prescription","fraction","ranking","target_type",
     "minimum_age","maximum_age","begin_time","end_time","site_selection")
@@ -48,12 +50,12 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
   for(name in c("prescription","ranking","target_type","site_selection"))
     p[[name]]<-as.character(p[[name]])
   if(anyNA(p$prescription)||any(!nzchar(p$prescription))||
-     anyNA(p$ranking)||any(!p$ranking%in%c("MaxCohortAge","Random"))||
+     anyNA(p$ranking)||any(!p$ranking%in%c("MaxCohortAge","Random","Economic"))||
      anyNA(p$target_type)||any(p$target_type!="area")||
      anyNA(p$site_selection)||
      any(!p$site_selection %in% c("Complete", "CompleteStandSpread", "CompleteStandSpreading") &
          !.harvest_is_partial(p$site_selection) & p$site_selection != "PatchCutting"))
-    stop("Expected MaxCohortAge or Random ranking and a supported site selection with area quotas",
+    stop("Expected MaxCohortAge, Random or Economic ranking and a supported site selection with area quotas",
          call.=FALSE)
   patch <- p$site_selection == "PatchCutting"
   spreading <- p$site_selection != "Complete" & !patch
@@ -101,6 +103,15 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     val<-if(name%in%names(p))p[[name]] else rep(default,nrow(p))
     .h04_integer(val,name,0L)
   }
+  minimum_biomass <- numeric(nrow(p))
+  if ("minimum_biomass_mg_ha" %in% names(p)) {
+    values <- p$minimum_biomass_mg_ha
+    if ((!is.numeric(values) && !(is.logical(values) && all(is.na(values)))) ||
+        any(is.nan(values)) || any(!is.na(values) & (!is.finite(values) | values < 0))) {
+      stop("minimum_biomass_mg_ha must contain nonnegative finite numbers or NA", call.=FALSE)
+    }
+    minimum_biomass[!is.na(values)] <- values[!is.na(values)]
+  }
   threshold<-optional_integer("stand_adjacency",0L)
   hist_gap<-optional_integer("minimum_time_since_last_harvest",0L)
   min_damage <- optional_integer("min_time_since_damage", 0L)
@@ -119,7 +130,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
   if(anyNA(key)||any(!key%in%names(codes))||any(threshold>0L & key=="none"))
     stop("Active stand adjacency requires StandAge or TimeSinceLastHarvested",call.=FALSE)
   kind<-as.integer(unname(codes[key]))
-  species_names<-as.character(simulation$ctx$config$species$species)
+  species_names<-as.character(forest$species)
   forest_species<-if("forest_type_species"%in%names(p))
     as.character(p$forest_type_species) else rep(NA_character_,nrow(p))
   if(length(forest_species)!=nrow(p))stop("Invalid forest_type_species",call.=FALSE)
@@ -192,11 +203,15 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
            fraction=as.numeric(rules$fraction))
     })
     rule_index <- match(p$prescription, names_needed)
+    distinct_rules <- unique(removal_rules)
+    rule_lookup <- match(removal_rules, distinct_rules)
+    rule_index <- rule_lookup[rule_index]
     rule_index[!active] <- 0L
+    removal_rules <- distinct_rules
   }
   cfg<-list(ma=as.integer(match(p$management_area,topology$management_areas)-1L),
     fraction=as.numeric(p$fraction),
-    ranking_code=as.integer(ifelse(p$ranking=="Random",1L,0L)),
+    ranking_code=as.integer(match(p$ranking, c("MaxCohortAge", "Random", "Economic")) - 1L),
     min_age=as.integer(p$minimum_age),
     max_age=as.integer(p$maximum_age),begin=as.integer(p$begin_time),
     end=as.integer(p$end_time),adjacent_limit=as.integer(threshold),
@@ -204,6 +219,35 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     species_count=as.integer(length(species_names)),
     forest_species=as.integer(forest_index),forest_min_age=as.integer(forest_lo),
     forest_max_age=as.integer(forest_hi),forest_percent=as.numeric(forest_pct))
+  economic <- which(p$ranking == "Economic")
+  if (length(economic)) {
+    if (!is.list(p$economic) || length(p$economic) != nrow(p))
+      stop("Economic requires an economic list column of species ranking tables", call.=FALSE)
+    tables <- lapply(p$economic[economic], function(x) {
+      fields <- c("species", "rank", "merchantable_age")
+      if (!is.data.frame(x) || !all(fields %in% names(x)) ||
+          anyNA(x$species) || anyDuplicated(x$species) || any(!x$species %in% species_names))
+        stop("Invalid Economic species table", call.=FALSE)
+      weights <- .h04_integer(x$rank, "Economic rank", 0L)
+      ages <- .h04_integer(x$merchantable_age, "Economic merchantable age", 0L)
+      if (any(weights > 100L) || any(ages > 65535L))
+        stop("Invalid Economic rank or merchantable age", call.=FALSE)
+      lookup <- match(species_names, x$species)
+      weights <- weights[lookup]
+      ages <- ages[lookup]
+      ages[is.na(ages)] <- 0L
+      weights <- ifelse(ages > 0, weights / pmax(1, ages), 0)
+      list(weight = weights, age = ages)
+    })
+    distinct <- unique(tables)
+    cfg$economic_index <- rep.int(-1L, nrow(p))
+    cfg$economic_index[economic] <- match(tables, distinct) - 1L
+    cfg$economic_weight <- do.call(rbind, lapply(distinct, `[[`, "weight"))
+    cfg$economic_age <- do.call(rbind, lapply(distinct, `[[`, "age"))
+  }
+  use_biomass <- minimum_biomass > 0 & p$fraction > 0 &
+    year >= p$begin_time & year <= p$end_time
+  if (any(use_biomass)) cfg$minimum_biomass_mg_ha <- minimum_biomass
   if (!is.null(shared)) cfg$landis_rng_state <- shared$state
   excluded <- simulation$establishment$excluded_cells
   if (length(excluded))
@@ -240,7 +284,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     cfg$current_rank <- repeat_state$rank
     cfg$repeat_end_year <- simulation$project$canonical$duration
     cfg$repeat_compatible <- allocation_mode == "landis_compatible"
-    cfg$repeat_rule_index <- as.integer(match(repeat_rule_names, names_needed) - 1L)
+    cfg$repeat_rule_index <- as.integer(rule_lookup[match(repeat_rule_names, names_needed)] - 1L)
   }
   if (any(spreading)) {
     cfg$spreading <- spreading
@@ -248,7 +292,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     cfg$max_block_ha <- max_block_ha
   }
   if (any(spreading | patch))
-    cfg$cell_area_ha <- (as.numeric(simulation$ctx$config$cell_length) / 100)^2
+    cfg$cell_area_ha <- (as.numeric(forest$cell_length) / 100)^2
   if (any(patch)) {
     cfg$patch_fraction <- cfg$patch_size_ha <- numeric(nrow(p))
     cfg$patch_overlap <- rep(FALSE, nrow(p))
@@ -268,7 +312,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     cfg$rule_index <- as.integer(rule_index - 1L)
   }
   # One batched native pass over all existing shared living CSR states.
-  nat<-.Call("h04e4d_plan",simulation$states,simulation$cell_state,
+  nat<-.Call("h04e4d_plan",forest$states,forest$cell_state,
     topology$positions,topology$stand_offsets,topology$ma_offsets,
     topology$d2_neighbors$offsets,topology$d2_neighbors$indices,
     topology$d2_neighbors$first_position,cfg,last,
@@ -349,20 +393,52 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
   allocation_mode <- match.arg(allocation_mode)
   plan<-harvest_plan_e4d(simulation,topology,prescriptions,history,year,
     landis_seed,landis_rng_offset,allocation_mode,rules_by_prescription,harvest_timestep,damage_history)
-  chosen<-unique(as.character(plan$events$Prescription))
-  current<-simulation;effects<-list();sites<-list()
-  planting <- list()
-  planted_species <- list()
-  excluded <- list()
-  species <- as.character(simulation$ctx$config$species$species)
-  for(pres in chosen){
-    k<-which(plan$events$Prescription==pres)
-    target<-as.integer(unlist(plan$events$cells[k],use.names=FALSE))
-    treatment <- if ("treatment" %in% names(plan$events)) plan$events$treatment[k[1L]] else pres
+  .harvest_apply_plan_e4d(simulation, plan, rules_by_prescription, allocation_mode)
+}
+
+.harvest_apply_plan_e4d <- function(simulation, plan, rules_by_prescription, allocation_mode,
+                                     batch = TRUE) {
+  forest <- landisR::landis_csr(simulation)
+  events <- plan$events
+  chosen <- unique(as.character(events$Prescription))
+  event_groups <- split(seq_len(nrow(events)), factor(events$Prescription, levels = chosen))
+  preserve_order <- allocation_mode == "landis_compatible"
+  # Only group independent edits and use the exact, order-preserving state key.
+  # Zero-biomass cohorts are ignored by that key, so retain sequential
+  # application when their stored representation might affect state reuse.
+  selected <- if (batch && preserve_order && length(chosen) > 1L)
+    as.integer(unlist(events$cells, use.names = FALSE)) else integer()
+  batch <- length(selected) > 0L && anyDuplicated(selected) == 0L &&
+    isTRUE(all(forest$states$biomass > 0))
+  positions <- if (batch) match(selected, forest$cell_id) else integer()
+  if (anyNA(positions)) stop("Unknown or inactive cell", call. = FALSE)
+  event_sizes <- lengths(events$cells)
+  event_starts <- c(0L, cumsum(event_sizes)) + 1L
+  current <- simulation
+  effects <- sites <- planting <- planted_species <- excluded <- list()
+  replacement <- cleared <- journal <- vector("list", length(chosen))
+  species <- as.character(forest$species)
+  for (i in seq_along(chosen)) {
+    pres <- chosen[i]
+    k <- event_groups[[i]]
+    target <- as.integer(unlist(events$cells[k], use.names = FALSE))
     if (!length(target)) next
-    treatment <- .harvest_treatment(rules_by_prescription[[treatment]], species)
-    res <- harvest_apply_cells(current, target, rules = treatment$rules, clearcut = FALSE,
-                               preserve_cohort_order = allocation_mode == "landis_compatible")
+    treatment_name <- if ("treatment" %in% names(events)) events$treatment[k[1L]] else pres
+    treatment <- .harvest_treatment(rules_by_prescription[[treatment_name]], species)
+    if (batch) {
+      indices <- sequence(event_sizes[k], from = event_starts[k])
+      res <- .harvest_remove_at_positions(forest, as.integer(forest$cell_id),
+                                          positions[indices], species, treatment$rules)
+      if (length(res$changed_cells)) {
+        replacement[[i]] <- res$replacement
+        cleared[[i]] <- res$clear_cells
+        journal[[i]] <- .harvest_apply_metadata(res)
+      }
+    } else {
+      res <- harvest_apply_cells(current, target, rules = treatment$rules,
+                                 preserve_cohort_order = preserve_order)
+      current <- res$simulation
+    }
     if (length(treatment$plant)) {
       planted_species[[pres]] <- treatment$plant
       planting[[pres]] <- data.frame(
@@ -372,8 +448,15 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
     }
     if (treatment$prevent_establishment)
       excluded[[pres]] <- res$changed_cells
-    current<-res$simulation;effects[[pres]]<-res$effects
+    effects[[pres]]<-res$effects
     z<-res$sites;z$prescription<-pres;sites[[pres]]<-z
+  }
+  if (batch && any(lengths(journal))) {
+    current <- landisR::landis_apply_cohort_batch(
+      simulation, cohorts = do.call(rbind, replacement),
+      clear_cells = as.integer(unlist(cleared, use.names = FALSE)),
+      event_metadata = Filter(Negate(is.null), journal),
+      preserve_cohort_order = TRUE)
   }
   all_sites<-if(length(sites))do.call(rbind,sites)else data.frame()
   # Preserve selected-but-no-effect events as zero-site, zero-biomass log rows.
@@ -382,7 +465,7 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
   ev$HarvestedSites<-integer(nrow(ev))
   ev$MgBiomassRemoved<-numeric(nrow(ev))
   if(nrow(ev)&&nrow(all_sites)){
-    chosen_cells<-as.integer(unlist(ev$cells,use.names=FALSE))
+    chosen_cells <- if (length(selected)) selected else as.integer(unlist(ev$cells, use.names = FALSE))
     event_of_cell<-rep.int(seq_len(nrow(ev)),lengths(ev$cells))
     at<-match(as.integer(all_sites$cell_id),chosen_cells)
     if(anyNA(at))stop("Harvest output includes unplanned cells",call.=FALSE)
@@ -390,7 +473,7 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
     ev$HarvestedSites<-tabulate(eidx[all_sites$removed_g_m2>0],nbins=nrow(ev))
     total<-rowsum(as.numeric(all_sites$removed_g_m2),group=eidx,reorder=TRUE)
     if(nrow(total))ev$MgBiomassRemoved[as.integer(rownames(total))]<-
-      total[,1L]*(as.numeric(simulation$ctx$config$cell_length)^2/1e6)
+      total[,1L]*(as.numeric(forest$cell_length)^2/1e6)
   }
   credited <- integer(nrow(plan$prescriptions))
   if (nrow(ev)) {

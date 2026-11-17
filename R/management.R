@@ -10,8 +10,9 @@
 }
 harvest_prepare_management <- function(simulation, management) {
   .h04_sim(simulation)
+  forest <- landisR::landis_csr(simulation)
   if(!is.data.frame(management)||!all(c("cell_id","management_area","stand")%in%names(management))) stop("management requires cell_id, management_area, stand")
-  ids <- as.integer(simulation$ctx$ids)
+  ids <- as.integer(forest$cell_id)
   if(!length(ids)) stop("Empty landscape")
   cell <- .h04_integer(management$cell_id,"cell_id"); ma <- .h04_integer(management$management_area,"management_area"); st <- .h04_integer(management$stand,"stand")
   if(length(cell)!=length(ids)||anyDuplicated(cell)||!setequal(cell,ids)) stop("Exactly one management row per active cell is required")
@@ -27,13 +28,14 @@ harvest_prepare_management <- function(simulation, management) {
 }
 harvest_plan_complete <- function(simulation, topology, targets) {
   .h04_sim(simulation)
-  if(!inherits(topology,"landisR_h04_topology")||!identical(topology$ids,as.integer(simulation$ctx$ids))) stop("Topology does not match active cell IDs/order")
+  forest <- landisR::landis_csr(simulation)
+  if(!inherits(topology,"landisR_h04_topology")||!identical(topology$ids,as.integer(forest$cell_id))) stop("Topology does not match active cell IDs/order")
   if(!is.data.frame(targets)||!all(c("management_area","fraction","minimum_age")%in%names(targets))) stop("targets requires management_area, fraction, minimum_age")
   ma <- .h04_integer(targets$management_area,"target management_area"); minimum <- .h04_integer(targets$minimum_age,"minimum_age",0)
   f <- targets$fraction
   if(!is.numeric(f)||anyNA(f)||any(!is.finite(f))||any(f<0|f>1)||anyDuplicated(ma)||!setequal(ma,topology$management_areas)) stop("One target per MA; fraction must be in [0,1]")
   k <- match(topology$management_areas,ma)
-  n <- .Call("h04_plan",simulation$states,as.integer(simulation$cell_state),topology$positions,topology$stand_offsets,topology$ma_offsets,as.numeric(f[k]),minimum[k],PACKAGE="landisR.harvest")
+  n <- .Call("h04_plan",forest$states,as.integer(forest$cell_state),topology$positions,topology$stand_offsets,topology$ma_offsets,as.numeric(f[k]),minimum[k],PACKAGE="landisR.harvest")
   stands <- topology$stands; stands$stand_age <- n$stand_age; stands$rank <- n$stand_age
   stands$selected <- seq_len(nrow(stands)) %in% n$selected_stands
   list(stands=stands,selected_stands=stands[n$selected_stands,,drop=FALSE],cells=topology$ids[n$selected_positions],

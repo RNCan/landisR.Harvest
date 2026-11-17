@@ -6,6 +6,7 @@ harvest_plan_c3 <- function(simulation, topology, targets,
                             economic=NULL, forest_type=NULL,
                             allocation_mode=c("corrected","landis_compatible"),
                             landis_seed, landis_rng_offset=0) {
+  forest <- landisR::landis_csr(simulation)
   allocation_mode <- match.arg(allocation_mode)
   if(missing(landis_seed)) stop("landis_seed is required to reproduce LANDIS-II Random",call.=FALSE)
   if(!is.numeric(landis_seed) || length(landis_seed)!=1L || is.na(landis_seed) ||
@@ -33,7 +34,7 @@ harvest_plan_c3 <- function(simulation, topology, targets,
   fraction <- as.numeric(targets$fraction[ord]); target_type <- as.character(targets$target_type[ord])
   if(anyNA(ranking)||anyNA(fraction)||any(!is.finite(fraction))||any(fraction<0|fraction>1))stop("Invalid target",call.=FALSE)
   if(anyNA(target_type)||any(!target_type%in%c("area","stands")))stop("Invalid target_type",call.=FALSE)
-  nr <- as.integer(simulation$ctx$nrow);nc <- as.integer(simulation$ctx$ncol)
+  nr <- as.integer(forest$nrow);nc <- as.integer(forest$ncol)
   first <- integer(nrow(topology$stands))
   for(s in seq_along(first)) {
     p <- seq.int(topology$stand_offsets[s]+1L,topology$stand_offsets[s+1L])

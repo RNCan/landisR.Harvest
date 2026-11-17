@@ -7,6 +7,7 @@ harvest_plan_e2 <- function(simulation, topology, prescriptions,
                             landis_rng_offset=0,
                             allocation_mode=c("corrected","landis_compatible")) {
   .h04_sim(simulation)
+  forest <- landisR::landis_csr(simulation)
   allocation_mode<-match.arg(allocation_mode)
   if(missing(landis_seed))stop("landis_seed is required",call.=FALSE)
   valid_scalar<-function(x,lo,hi){is.numeric(x)&&length(x)==1L&&!is.na(x)&&is.finite(x)&&x>=lo&&x<=hi&&x==trunc(x)}
@@ -14,7 +15,7 @@ harvest_plan_e2 <- function(simulation, topology, prescriptions,
   if(!valid_scalar(landis_rng_offset,0,1e9))stop("Invalid landis_rng_offset",call.=FALSE)
   if(!valid_scalar(year,0,1e9))stop("Invalid harvest year",call.=FALSE)
   if(!inherits(topology,"landisR_h04_topology") ||
-     !identical(topology$ids,as.integer(simulation$ctx$ids)))
+     !identical(topology$ids,as.integer(forest$cell_id)))
      stop("Topology does not match current landscape",call.=FALSE)
   required<-c("management_area","prescription","fraction","ranking","target_type",
                "minimum_age","maximum_age","begin_time","end_time","site_selection")
@@ -50,7 +51,7 @@ harvest_plan_e2 <- function(simulation, topology, prescriptions,
     ranking="MaxCohortAge",fraction=0,target_type="area",
     minimum_age=0L,maximum_age=65535L,site_selection="Complete")
   base<-harvest_plan_c2(simulation,topology,baseline,allocation_mode=allocation_mode)
-  nr<-as.integer(simulation$ctx$nrow);nc<-as.integer(simulation$ctx$ncol)
+  nr<-as.integer(forest$nrow);nc<-as.integer(forest$ncol)
   first<-integer(nrow(topology$stands))
   for(s in seq_along(first)){
     i<-seq.int(topology$stand_offsets[s]+1L,topology$stand_offsets[s+1L])

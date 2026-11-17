@@ -5,11 +5,12 @@
 # AdjacencyNeighborSetAside has no effect for SiteSelection Complete in v7.
 harvest_prepare_adjacency_d2 <- function(simulation, topology) {
   .h04_sim(simulation)
+  forest <- landisR::landis_csr(simulation)
   if(!inherits(topology,"landisR_h04_topology") ||
-     !identical(topology$ids,as.integer(simulation$ctx$ids)))
+     !identical(topology$ids,as.integer(forest$cell_id)))
     stop("Topology does not match current landscape",call.=FALSE)
   ans <- .Call("h04d2_topology",as.integer(topology$ids),topology$positions,
-    topology$stand_offsets,as.integer(c(simulation$ctx$nrow,simulation$ctx$ncol)),
+    topology$stand_offsets,as.integer(c(forest$nrow,forest$ncol)),
     PACKAGE="landisR.harvest")
   topology$d2_neighbors <- ans
   topology
@@ -19,9 +20,10 @@ harvest_plan_d2 <- function(simulation, topology, targets, history=NULL, year=si
                             economic=NULL, forest_type=NULL,
                             allocation_mode=c("corrected","landis_compatible")) {
   .h04_sim(simulation)
+  forest <- landisR::landis_csr(simulation)
   allocation_mode <- match.arg(allocation_mode)
   if(is.null(topology$d2_neighbors) ||
-     !identical(topology$ids,as.integer(simulation$ctx$ids)))
+     !identical(topology$ids,as.integer(forest$cell_id)))
     stop("Prepare cached adjacency first: harvest_prepare_adjacency_d2",call.=FALSE)
   if(!is.data.frame(targets) ||
      !all(c("management_area","ranking","fraction","target_type") %in% names(targets)))
