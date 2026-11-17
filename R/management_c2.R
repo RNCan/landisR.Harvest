@@ -6,9 +6,10 @@ harvest_plan_c2 <- function(simulation, topology, targets,
                             economic=NULL, forest_type=NULL,
                             allocation_mode=c("corrected","landis_compatible")) {
   .h04_sim(simulation)
+  forest <- landisR::landis_csr(simulation)
   allocation_mode <- match.arg(allocation_mode)
   if(!inherits(topology,"landisR_h04_topology") ||
-     !identical(topology$ids,as.integer(simulation$ctx$ids)))
+     !identical(topology$ids,as.integer(forest$cell_id)))
     stop("Topology does not match simulation",call.=FALSE)
   if(!is.data.frame(targets) ||
      !all(c("management_area","fraction","ranking","target_type")%in%names(targets)))
@@ -38,7 +39,7 @@ harvest_plan_c2 <- function(simulation, topology, targets,
      (anyNA(targets$cohorts_removed)||any(targets$cohorts_removed!="ClearCut")))
     stop("H04-C2 is qualified for ClearCut only",call.=FALSE)
 
-  species <- as.character(simulation$ctx$config$species$species)
+  species <- as.character(forest$species)
   nsp <- length(species)
   weights <- matrix(0,nrow=nma,ncol=nsp)
   merchant <- matrix(1L,nrow=nma,ncol=nsp)
@@ -108,14 +109,14 @@ harvest_plan_c2 <- function(simulation, topology, targets,
     pair_sp <- as.integer(match(fs,species)-1L)
   }
 
-  native <- .Call("h04c2_plan",simulation$states,as.integer(simulation$cell_state),
+  native <- .Call("h04c2_plan",forest$states,as.integer(forest$cell_state),
     topology$positions,topology$stand_offsets,topology$ma_offsets,
     weights,merchant,as.integer(match(ranking,c("MaxCohortAge","Economic","RegulateAges"))-1L),
     f,minimum,maximum,as.integer(match(target_type,c("area","stands"))-1L),
     rep.int(as.integer(identical(allocation_mode,"landis_compatible")),nma),
     rule_ma,rule_kind,rule_lo,rule_hi,rule_pct,rule_highest,pair_rule,pair_sp,
-    as.integer(c(simulation$ctx$nrow,simulation$ctx$ncol)),
-    as.integer(simulation$ctx$ids),
+    as.integer(c(forest$nrow,forest$ncol)),
+    as.integer(forest$cell_id),
     PACKAGE="landisR.harvest")
   stands <- topology$stands
   stands$stand_age <- as.integer(native$stand_age)

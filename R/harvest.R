@@ -1,30 +1,44 @@
 # H03-A: one deterministic treatment, on a supplied set of unique cells.
-# Internal layout is version-pinned; public application is through landis_apply.
+# Read the shared CSR through the core and apply one sparse cohort edit.
 harvest_apply_cells <- function(simulation, cells, rules=NULL, clearcut=FALSE,
                                 preserve_cohort_order = FALSE) {
   .h04_sim(simulation)
   if (!is.logical(clearcut) || length(clearcut)!=1L || is.na(clearcut)) stop("Invalid clearcut")
   if (!is.numeric(cells) || anyNA(cells) || any(!is.finite(cells)) || any(cells!=trunc(cells)) || any(cells<1 | cells>.Machine$integer.max) || anyDuplicated(cells)) stop("cells must be unique integer IDs")
-  ids <- as.integer(simulation$ctx$ids)
+  forest <- landisR::landis_csr(simulation)
+  ids <- as.integer(forest$cell_id)
   positions <- match(as.integer(cells),ids)
   if (anyNA(positions)) stop("Unknown or inactive cell")
-  sp <- as.character(simulation$ctx$config$species$species)
+  sp <- as.character(forest$species)
   if (clearcut && !is.null(rules)) stop("clearcut and rules are mutually exclusive")
   rules <- .harvest_validate_rules(rules, sp)
-  ans <- .Call("h03_apply",simulation$states,as.integer(simulation$cell_state),ids,as.integer(positions),sp,as.integer(match(rules$species,sp)-1L),as.numeric(rules$age_min),as.numeric(rules$age_max),as.numeric(rules$fraction),clearcut,PACKAGE="landisR.harvest")
+  ans <- .harvest_remove_at_positions(forest, ids, positions, sp, rules, clearcut)
   # Single commit, no expansion of unaffected cohorts; no RNG or time advance.
   if (length(ans$changed_cells)) {
     update <- landisR::landis_update(
       cohorts = ans$replacement,
       clear_cells = ans$clear_cells,
       preserve_cohort_order = preserve_cohort_order,
-      metadata = list(source = "harvest_h03a", changed_cells = length(ans$changed_cells),
-                      removed_g_m2_sum = sum(ans$sites$removed_g_m2))
+      metadata = .harvest_apply_metadata(ans)
     )
     simulation <- landisR::landis_apply(simulation, update)
   }
   ans$simulation <- simulation
   ans
+}
+
+.harvest_remove_at_positions <- function(forest, ids, positions, species, rules,
+                                         clearcut = FALSE) {
+  .Call("h03_apply", forest$states, as.integer(forest$cell_state),
+        ids, as.integer(positions), species,
+        as.integer(match(rules$species, species) - 1L),
+        as.numeric(rules$age_min), as.numeric(rules$age_max), as.numeric(rules$fraction),
+        clearcut, PACKAGE = "landisR.harvest")
+}
+
+.harvest_apply_metadata <- function(result) {
+  list(source = "harvest_h03a", changed_cells = length(result$changed_cells),
+       removed_g_m2_sum = sum(result$sites$removed_g_m2))
 }
 
 .harvest_validate_rules <- function(rules, sp) {

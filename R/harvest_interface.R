@@ -67,11 +67,11 @@ harvest_extension <- function(management, prescriptions, rules_by_prescription,
     single <- prescriptions$repeat_type %in% "SingleRepeat"
     names_to_validate <- unique(c(as.character(prescriptions$prescription[active]),
       if (any(single)) paste0(prescriptions$prescription[single], "(1)")))
+    species <- as.character(landisR::landis_csr(simulation)$species)
     for (name in names_to_validate) {
       if (!name %in% names(rules_by_prescription))
         stop("Traitement manquant pour la prescription ", name, ".", call. = FALSE)
-      .harvest_treatment(rules_by_prescription[[name]],
-                         as.character(simulation$ctx$config$species$species))
+      .harvest_treatment(rules_by_prescription[[name]], species)
     }
     list(topology = topology, history = NULL, seed = harvest_seed,
          rng_offset = rng_offset, timestep = interval)

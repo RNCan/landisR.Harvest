@@ -200,6 +200,40 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
      filter_of[j]=k;
    }else if(ft_species[j]!=-1) stop("Invalid E3 forest species sentinel");
  }
+ const auto prescription_offsets = h04e4d::prescription_offsets(as<std::vector<int>>(mo), params);
+ std::vector<std::vector<int>> prescriptions_by_area(nm);
+ for (int j = 0; j < np; ++j) prescriptions_by_area[ma[j]].push_back(j);
+
+ IntegerVector economic_index(np, -1);
+ NumericMatrix economic_weight;
+ IntegerMatrix economic_age;
+ int economic_count = 0;
+ if (cfg.containsElementNamed("economic_index")) {
+   economic_index = as<IntegerVector>(cfg["economic_index"]);
+   economic_weight = as<NumericMatrix>(cfg["economic_weight"]);
+   economic_age = as<IntegerMatrix>(cfg["economic_age"]);
+   economic_count = economic_weight.nrow();
+   if (economic_index.size() != np || economic_weight.ncol() != species_count ||
+       economic_age.nrow() != economic_count || economic_age.ncol() != species_count)
+     stop("Invalid Economic ranking tables");
+   for (int j = 0; j < np; ++j)
+     if (ranking_code[j] == 2 && (economic_index[j] < 0 || economic_index[j] >= economic_count))
+       stop("Missing Economic ranking table");
+ }
+ std::vector<double> economic_cache(static_cast<std::size_t>(economic_count) * nstates,
+                                    std::numeric_limits<double>::quiet_NaN());
+ const auto economic_rank = [&](int table, int state) {
+   double& rank = economic_cache[static_cast<std::size_t>(table) * nstates + state];
+   if (std::isnan(rank)) {
+     rank = 0;
+     for (int q = coff[state]; q < coff[state + 1]; ++q) {
+       const int minimum = economic_age(table, sp[q]);
+       if (minimum > 0 && cohort_age[q] >= minimum)
+         rank += economic_weight(table, sp[q]) * cohort_age[q];
+     }
+   }
+   return rank;
+ };
  // Cache whether a compressed cell state yields a positive removal under
  // each distinct prescription. Disjoint stands keep these predictions valid
  // until application, with no trial edits to the landscape.
@@ -236,12 +270,22 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
  for (int i:due_rule)
    if(i>=static_cast<int>(removal_rules.size())) stop("Missing rules for repeat harvest");
  std::vector<signed char> cache_removal(static_cast<std::size_t>(nstates)*removal_rules.size(),-1);
- std::vector<int> effective_sites(credit_effective ? static_cast<std::size_t>(np)*ns : 0,0);
+ std::vector<int> effective_sites(credit_effective ? prescription_offsets.back() : 0,0);
+ const bool use_biomass = cfg.containsElementNamed("minimum_biomass_mg_ha");
+ NumericVector minimum_biomass;
+ std::vector<double> cache_biomass;
+ if (use_biomass) {
+   minimum_biomass = as<NumericVector>(cfg["minimum_biomass_mg_ha"]);
+   if (minimum_biomass.size() != np) stop("Invalid minimum stand biomass vector");
+   for (double value : minimum_biomass)
+     if (!std::isfinite(value) || value < 0) stop("Invalid minimum stand biomass");
+   cache_biomass.resize(nstates, 0.0);
+ }
  std::vector<int> cache_age(nstates,-1);
  std::vector<unsigned char> cache_flag(static_cast<std::size_t>(nstates)*filters.size(),0);
  std::vector<int> age(ns,0);
- std::vector<double> ranks(static_cast<std::size_t>(np)*ns,0);
- std::vector<unsigned char> qualifies(static_cast<std::size_t>(np)*ns,1);
+ std::vector<double> ranks(prescription_offsets.back(),0);
+ std::vector<unsigned char> qualifies(prescription_offsets.back(),1);
  std::vector<int> counts(filters.size(),0);
  int management_area=0;
  for(int s=0;s<ns;++s){
@@ -249,16 +293,17 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
    if(so[s]>=so[s+1]||so[s]<0||so[s+1]>pos.size())stop("Invalid E3 stand offsets");
    std::fill(counts.begin(),counts.end(),0);
    while (management_area+1<nm && s>=mo[management_area+1]) ++management_area;
-   double sum_age=0;
+   double sum_age=0, sum_biomass=0;
    for(int k=so[s];k<so[s+1];++k){
      int position=pos[k];if(position<0||position>=cs.size())stop("Invalid E3 active cell position");
-     if (!damage.listed(position)) continue;
-     if (!listed_sites.empty()) ++listed_sites[s];
+     const bool listed = damage.listed(position);
+     if (!listed && !use_biomass) continue;
      int st=cs[position]-1;if(st<0||st>=nstates)stop("Invalid E3 shared state reference");
      if(cache_age[st]<0){
        int ma=0;
        for(int q=coff[st];q<coff[st+1];++q) {
          ma=std::max(ma,static_cast<int>(cohort_age[q]));
+         if (use_biomass) cache_biomass[st] += biomass[q];
          for(std::size_t f=0;f<filters.size();++f){
            const auto &x=filters[f];
            if(sp[q]==x.species&&cohort_age[q]>=x.lo&&cohort_age[q]<=x.hi)
@@ -267,6 +312,9 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
        }
        cache_age[st]=ma;
      }
+     if (use_biomass) sum_biomass += cache_biomass[st];
+     if (!listed) continue;
+     if (!listed_sites.empty()) ++listed_sites[s];
      sum_age+=cache_age[st];
      for(std::size_t f=0;f<filters.size();++f)
        counts[f]+=cache_flag[static_cast<std::size_t>(st)*filters.size()+f];
@@ -286,19 +334,27 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
        return has_removal;
      };
      for (int j : active_prescriptions[management_area])
-       effective_sites[static_cast<std::size_t>(j)*ns+s]+=evaluate_removal(rule_index[j]);
+       effective_sites[prescription_offsets[j] + (s - mo[management_area])] += evaluate_removal(rule_index[j]);
+     for (int j : prescriptions_by_area[management_area])
+       if (economic_index[j] >= 0 && yearv[0] >= beg[j] && yearv[0] <= end[j] && fraction[j] > 0)
+         ranks[prescription_offsets[j] + (s - mo[management_area])] += economic_rank(economic_index[j], st);
      if (!due_rule.empty() && due_rule[s]>=0) evaluate_removal(due_rule[s]);
    }
    const int total = listed_sites.empty() ? so[s+1]-so[s] : listed_sites[s];
    if (total > 0) age[s]=static_cast<int>(sum_age/total);
-   for(int j=0;j<np;++j){
-     int ix=j*ns+s;
+   // The denominator includes all active managed cells, including empty ones.
+   const double biomass_mg_ha = sum_biomass / (100.0 * (so[s+1]-so[s]));
+   for (int j : prescriptions_by_area[management_area]) {
+     const auto ix = prescription_offsets[j] + (s - mo[management_area]);
      if (total == 0) qualifies[ix] = 0;
      if(filter_of[j]>=0 && total>0){
        int matches=counts[filter_of[j]];
        qualifies[ix]=static_cast<unsigned char>(100.0*matches+1e-12>=ft_pct[j]*total);
      }
-     ranks[ix]=qualifies[ix]?age[s]:0.0;
+     if (use_biomass && biomass_mg_ha < minimum_biomass[j]) qualifies[ix] = 0;
+     if (qualifies[ix])
+       ranks[ix] = economic_index[j] >= 0 ? ranks[ix] / total : age[s];
+     else ranks[ix] = 0;
    }
  }
  std::vector<int> normalized_history=as<std::vector<int>>(history);
@@ -333,7 +389,7 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
  h04e4d::Result out=h04e4d::select(
    as<std::vector<int>>(so),as<std::vector<int>>(mo),
    as<std::vector<int>>(no),as<std::vector<int>>(ni),
-   as<std::vector<int>>(first),age,ranks,qualifies,params,normalized_history,
+   as<std::vector<int>>(first),age,std::move(ranks),qualifies,params,normalized_history,
    static_cast<int>(yearv[0]),rng,effective_sites,cell_area_ha,cell_topology,reserve_until,repeat,std::move(damage),listed_sites);
  IntegerVector selected(out.events.size()),pres(out.events.size()),maevents(out.events.size()),
    event_age(out.events.size()),sites(out.events.size()),event_ids(out.events.size());

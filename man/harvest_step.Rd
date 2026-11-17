@@ -60,7 +60,10 @@ harvest_extension(management, prescriptions, rules_by_prescription,
   additional entries after the initial harvest. Use an integer of at least
   two, or leave it unset or zero for repeats through the simulation.
   Set \code{min_time_since_damage} to a nonnegative integer in years
-  to set the cell-level minimum. The default is zero.}
+  to set the cell-level minimum. The default is zero.
+  The optional numeric column \code{minimum_biomass_mg_ha} sets an inclusive
+  minimum living biomass density for each prescription. Omit the column or
+  supply \code{NA} or zero to disable the criterion for that prescription.}
   \item{rules_by_prescription}{Named list of treatments. Each treatment can
   be a removal data frame with columns \code{species}, \code{age_min},
   \code{age_max} and \code{fraction}, the string \code{"PlantOnly"}, or a list
@@ -101,7 +104,7 @@ harvest_extension(management, prescriptions, rules_by_prescription,
 }
 \description{
 The planner supports area quotas with Complete, CompleteStandSpread and
-PartialStandSpread or PatchCutting, with Random or MaxCohortAge ranking. CompleteStandSpread
+PartialStandSpread or PatchCutting, with Random, MaxCohortAge or Economic ranking. CompleteStandSpread
 adds whole eligible stands in the same management area, in rank order
 from the neighbors of any stand in the block. It stops adding stands
 when the maximum area is reached or no eligible neighbor remains. An
@@ -128,6 +131,17 @@ blocks, including within the same time step. The stand becomes eligible
 again at the harvest year plus the specified duration. If multiple
 harvests reserve a stand, the latest expiry applies. Reserved stands
 cannot start or join a harvest block while the reserve remains in effect.
+
+The biomass criterion applies to candidate stands for new entries,
+including neighboring stands in a spread block. The planner averages
+living biomass over all active managed cells in the stand, including
+cells with zero biomass. It sums all living cohorts, regardless of age,
+species or treatment rules. The density is in Mg/ha (100 g/m2 equals
+1 Mg/ha). It is evaluated on the shared forest state at the start of
+the Harvest step, after any extensions that already ran in that step.
+Age and other eligibility criteria still apply. Scheduled returns keep
+their existing eligibility rules. The biomass criterion is an optional
+LANDIS-R extension available in either allocation mode.
 
 A successful initial entry can schedule a return. The interval is rounded
 up to a multiple of the Harvest timestep. Reserved stands are unavailable
