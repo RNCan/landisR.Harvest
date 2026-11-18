@@ -29,3 +29,22 @@ harvest_complete_c3(simulation, topology, targets, economic = NULL,
   One random draw per harvested stand is modeled for the H04-C3a one-cell Complete fixtures, as observed in the LANDIS-II binaries. More complicated spatial selection methods remain to be qualified.
 }
 \value{\code{harvest_plan_c3} returns a plan with stand ranks, selected cells, management-area statistics and \code{landis_rng} offsets. \code{harvest_complete_c3} also applies the harvest to a new live CSR state and returns the plan and effects.}
+
+\examples{
+grid <- data.frame(cell_id = 1:2, row = 1L, col = 1:2, active = TRUE)
+project <- landisR::landis_build_landscape(grid, duration = 20L,
+  cell_length = 100, species = data.frame(species = "PINE"))
+sim <- landisR::landis_initialize(project)
+cohorts <- data.frame(cell_id = 1:2, species = "PINE",
+  age = c(40L, 20L), biomass = 100)
+sim <- landisR::landis_apply(sim, landisR::landis_update(cohorts = cohorts))
+management <- data.frame(cell_id = 1:2, management_area = 1L, stand = 1:2)
+topology <- harvest_prepare_management(sim, management)
+target <- data.frame(management_area = 1L, fraction = 0.5,
+  minimum_age = 0L, ranking = "MaxCohortAge", target_type = "area")
+target$ranking <- "Random"
+plan <- harvest_plan_c3(sim, topology, target, landis_seed = 42)
+plan$cells
+cut <- harvest_complete_c3(sim, topology, target, landis_seed = 42)
+cut$sites
+}

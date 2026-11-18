@@ -210,3 +210,33 @@ argument of \code{landisR::landis_sim()}.
 }
 \seealso{\code{harvest_plan()}, \code{harvest_plan_c2()}, \code{harvest_plan_c3()},
 \code{harvest_plan_d2()} for earlier qualified configurations.}
+
+\examples{
+grid <- data.frame(cell_id = 1:2, row = 1L, col = 1:2, active = TRUE)
+project <- landisR::landis_build_landscape(grid, duration = 20L,
+  cell_length = 100, species = data.frame(species = "PINE"))
+sim <- landisR::landis_initialize(project)
+cohorts <- data.frame(cell_id = 1:2, species = "PINE",
+  age = c(40L, 20L), biomass = 100)
+sim <- landisR::landis_apply(sim, landisR::landis_update(cohorts = cohorts))
+management <- data.frame(cell_id = 1:2, management_area = 1L, stand = 1:2)
+target <- data.frame(management_area = 1L, fraction = 0.5,
+  minimum_age = 0L, ranking = "MaxCohortAge", target_type = "area")
+prescriptions <- transform(target, prescription = "CUT", maximum_age = 120L,
+  begin_time = 10L, end_time = 20L, site_selection = "Complete")
+rules <- list(CUT = data.frame(species = "PINE",
+  age_min = 1L, age_max = 120L, fraction = 1))
+
+# Plan or perform a single harvest step on the starting forest.
+topology <- harvest_prepare(sim, management, prescriptions)
+plan <- harvest_plan_prescriptions(sim, topology, prescriptions, rules, year = 10L)
+cut <- harvest_step(sim, topology, prescriptions, rules, year = 10L,
+  progress = FALSE)
+cut$events
+
+# Alternatively let the core schedule harvest before succession.
+harvest <- harvest_extension(management, prescriptions, rules)
+run <- landisR::landis_sim(sim, steps = 1L, extensions = list(harvest = harvest),
+  progress = FALSE)
+run$events$harvest[["10"]]
+}

@@ -22,3 +22,26 @@ harvest_step_e2(simulation, topology, prescriptions, rules_by_prescription,
 }
 \details{H04-E2 is an experimental Complete and MaxCohortAge area-target pilot. It is not a full simulation-level RNG coupling. The C++ kernel executes one prescription-choice draw per harvested stand. The site effects are applied per prescription to disjoint selected cells using the H03 cohort engine. No dead pools are created. Spatial adjacency constraints, Random rankings, spreading, and repeat prescriptions are deliberately outside this pilot.}
 \value{The planner returns exact-ordered events, selected cells, per-prescription allocations, and RNG draw offsets. The step function also returns the updated shared living-cohort simulation and sparse effects.}
+
+\examples{
+grid <- data.frame(cell_id = 1:2, row = 1L, col = 1:2, active = TRUE)
+project <- landisR::landis_build_landscape(grid, duration = 20L,
+  cell_length = 100, species = data.frame(species = "PINE"))
+sim <- landisR::landis_initialize(project)
+cohorts <- data.frame(cell_id = 1:2, species = "PINE",
+  age = c(40L, 20L), biomass = 100)
+sim <- landisR::landis_apply(sim, landisR::landis_update(cohorts = cohorts))
+management <- data.frame(cell_id = 1:2, management_area = 1L, stand = 1:2)
+topology <- harvest_prepare_management(sim, management)
+target <- data.frame(management_area = 1L, fraction = 0.5,
+  minimum_age = 0L, ranking = "MaxCohortAge", target_type = "area")
+prescriptions <- transform(target, prescription = "CUT", maximum_age = 120L,
+  begin_time = 10L, end_time = 20L, site_selection = "Complete")
+rules <- list(CUT = data.frame(species = "PINE",
+  age_min = 1L, age_max = 120L, fraction = 1))
+plan <- harvest_plan_e2(sim, topology, prescriptions, year = 10L,
+  landis_seed = 42)
+cut <- harvest_step_e2(sim, topology, prescriptions, rules, year = 10L,
+  landis_seed = 42)
+cut$sites
+}
