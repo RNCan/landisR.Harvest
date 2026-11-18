@@ -1,4 +1,5 @@
 #include <Rcpp.h>
+#include <landisR/progress.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -294,7 +295,10 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
  std::vector<int> counts(filters.size(),0);
  int management_area=0;
  const auto analyse_start = timing ? Clock::now() : Clock::time_point{};
+ landis_progress::Reporter progress;
+ progress.start(0, 0.55, "Evaluating & ranking stands", ns);
  for(int s=0;s<ns;++s){
+   progress.advance(s);
    if(s%4096==0)checkUserInterrupt();
    if(so[s]>=so[s+1]||so[s]<0||so[s+1]>pos.size())stop("Invalid E3 stand offsets");
    std::fill(counts.begin(),counts.end(),0);
@@ -399,7 +403,9 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
    as<std::vector<int>>(no),as<std::vector<int>>(ni),
    as<std::vector<int>>(first),age,std::move(ranks),qualifies,params,normalized_history,
    static_cast<int>(yearv[0]),rng,effective_sites,cell_area_ha,cell_topology,reserve_until,repeat,std::move(damage),listed_sites,
-   cfg.containsElementNamed("landis_economic_order") && as<bool>(cfg["landis_economic_order"]));
+   cfg.containsElementNamed("landis_economic_order") && as<bool>(cfg["landis_economic_order"]),
+   progress ? &progress : nullptr);
+ progress.phase(0.97, "Collecting selected stands");
  const auto select_end = timing ? Clock::now() : Clock::time_point{};
  IntegerVector selected(out.events.size()),pres(out.events.size()),maevents(out.events.size()),
    event_age(out.events.size()),sites(out.events.size()),event_ids(out.events.size());

@@ -38,12 +38,13 @@ harvest_step <- function(simulation, topology, prescriptions, rules_by_prescript
                          seed = simulation$seed, rng_offset = 0,
                          allocation_mode = c("corrected", "landis_compatible"),
                          harvest_timestep = simulation$project$canonical$timestep,
-                                       damage_history = NULL) {
+                         damage_history = NULL,
+                         progress = getOption("landisR.progress", interactive())) {
   harvest_step_e4d(simulation, topology, prescriptions, rules_by_prescription,
                    history = history, year = year, landis_seed = seed,
                    landis_rng_offset = rng_offset, allocation_mode = match.arg(allocation_mode),
                    harvest_timestep = harvest_timestep,
-                   damage_history = damage_history)
+                   damage_history = damage_history, progress = progress)
 }
 
 harvest_extension <- function(management, prescriptions, rules_by_prescription,
@@ -95,8 +96,11 @@ harvest_extension <- function(management, prescriptions, rules_by_prescription,
   }
 
   step <- function(simulation, state, year) {
-    if (year %% state$timestep != 0L)
+    if (year %% state$timestep != 0L) {
+      report <- getOption("landisR.progress.report")
+      if (!is.null(report)) report(0, "Harvest not scheduled")
       return(list(simulation = simulation, state = state))
+    }
     if (landis_order && is.null(state$topology$d2_neighbors$landis_order))
       state$topology <- .harvest_prepare_adjacency(simulation, state$topology, landis_order = TRUE)
     result <- harvest_step(simulation, state$topology, prescriptions, rules_by_prescription,
@@ -104,11 +108,13 @@ harvest_extension <- function(management, prescriptions, rules_by_prescription,
                            rng_offset = if (is.null(simulation$landis_rng)) state$rng_offset else 0,
                            allocation_mode = allocation_mode, harvest_timestep = state$timestep,
                            damage_history = if (is.function(damage_history))
-                             damage_history(simulation, year) else damage_history)
+                             damage_history(simulation, year) else damage_history,
+                           progress = FALSE)
     state$history <- result$history
     state$rng_offset <- result$landis_rng_offset_end
     list(simulation = result$simulation, state = state, events = result$events)
   }
 
-  landisR::landis_extension(step, initialize, phase = "before_succession")
+  structure(landisR::landis_extension(step, initialize, phase = "before_succession"),
+            progress_label = "Biomass Harvest")
 }

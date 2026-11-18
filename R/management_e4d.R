@@ -18,8 +18,10 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
                             landis_seed, landis_rng_offset=0,
                             allocation_mode=c("corrected","landis_compatible"),
                             rules_by_prescription=NULL,
-                            harvest_timestep=simulation$project$canonical$timestep, damage_history=NULL) {
+                            harvest_timestep=simulation$project$canonical$timestep, damage_history=NULL,
+                            report = getOption("landisR.progress.report")) {
   timer <- .harvest_timer("planification_R", year)
+  if (!is.null(report)) report(0.01, "Preparing prescriptions")
   .h04_sim(simulation)
   forest <- landisR::landis_csr(simulation)
   allocation_mode <- match.arg(allocation_mode)
@@ -321,15 +323,17 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
   timing <- getOption("landisR.harvest.timing")
   if (is.environment(timing)) cfg$timing <- TRUE
   timer("preparation_prescriptions")
-  nat<-.Call("h04e4d_plan",forest$states,forest$cell_state,
+  nat <- landisR::landis_progress_native(report, 0.08, 0.52,
+    .Call("h04e4d_plan",forest$states,forest$cell_state,
     topology$positions,topology$stand_offsets,topology$ma_offsets,
     neighbors$offsets, if (cfg$landis_economic_order) neighbors$landis_order else neighbors$indices,
     topology$d2_neighbors$first_position,cfg,last,
     as.numeric(year),as.numeric(landis_seed),as.numeric(landis_rng_offset),
-    PACKAGE="landisR.harvest")
+    PACKAGE="landisR.harvest"))
   timer("planification_cpp")
   if (!is.null(nat$timing))
     .harvest_record_timing(timing, "planification_cpp", year, nat$timing)
+  if (!is.null(report)) report(0.53, "Assembling the harvest plan")
   s<-as.integer(nat$selected_stands);j<-as.integer(nat$prescription_indices)
   selected <- .Call("h04e4d_plan_cells", s, nat$partial_cells,
                     topology$stand_offsets, topology$positions, topology$ids,
@@ -395,18 +399,33 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
                             history=NULL,year=simulation$year,landis_seed,
                             landis_rng_offset=0,
                             allocation_mode=c("corrected","landis_compatible"),
-                            harvest_timestep=simulation$project$canonical$timestep, damage_history=NULL) {
+                            harvest_timestep=simulation$project$canonical$timestep, damage_history=NULL,
+                            progress = getOption("landisR.progress", interactive())) {
   if (!is.list(rules_by_prescription) || is.null(names(rules_by_prescription)))
     stop("Need a named list of cohort-removal tables",call.=FALSE)
   allocation_mode <- match.arg(allocation_mode)
+  if (!identical(progress, TRUE) && !identical(progress, FALSE))
+    stop("progress must be TRUE or FALSE.", call. = FALSE)
+  report <- getOption("landisR.progress.report")
+  bar <- landisR::landis_progress_bar(progress && is.null(report), "Biomass Harvest")
+  if (!is.null(bar)) {
+    on.exit(bar$close(), add = TRUE)
+    report <- function(fraction, label)
+      bar$update(fraction, paste("Year", year, "|", label))
+  }
   plan<-harvest_plan_e4d(simulation,topology,prescriptions,history,year,
-    landis_seed,landis_rng_offset,allocation_mode,rules_by_prescription,harvest_timestep,damage_history)
-  .harvest_apply_plan_e4d(simulation, plan, rules_by_prescription, allocation_mode)
+    landis_seed,landis_rng_offset,allocation_mode,rules_by_prescription,harvest_timestep,damage_history,
+    report)
+  result <- .harvest_apply_plan_e4d(simulation, plan, rules_by_prescription, allocation_mode,
+                                    report = report)
+  if (!is.null(bar)) report(1, "Complete")
+  result
 }
 
 .harvest_apply_plan_e4d <- function(simulation, plan, rules_by_prescription, allocation_mode,
-                                     batch = TRUE) {
+                                     batch = TRUE, report = NULL) {
   timer <- .harvest_timer("application", plan$year)
+  if (!is.null(report)) report(0.59, "Indexing selected cells")
   forest <- landisR::landis_csr(simulation)
   events <- plan$events
   chosen <- unique(as.character(events$Prescription))
@@ -428,7 +447,11 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
   replacement <- cleared <- journal <- vector("list", length(chosen))
   species <- as.character(forest$species)
   timer("indexation_cellules")
+  stride <- if (!is.null(report)) max(1L, ceiling(length(chosen) / 20))
   for (i in seq_along(chosen)) {
+    if (!is.null(report) && (i - 1L) %% stride == 0)
+      report(0.61 + 0.24 * (i - 1L) / length(chosen),
+             sprintf("Applying treatments %d/%d", i, length(chosen)))
     pres <- chosen[i]
     k <- event_groups[[i]]
     target <- as.integer(unlist(events$cells[k], use.names = FALSE))
@@ -471,6 +494,7 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
     timer("preparation_effets_et_plantation")
   }
   if (batch && any(lengths(journal))) {
+    if (!is.null(report)) report(0.86, "Applying changes to cohorts")
     cohorts <- do.call(rbind, replacement)
     clear_cells <- as.integer(unlist(cleared, use.names = FALSE))
     event_metadata <- Filter(Negate(is.null), journal)
@@ -486,6 +510,7 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
       timer("regeneration")
     }
   }
+  if (!is.null(report)) report(0.92, "Calculating removals & quotas")
   all_sites<-if(length(sites))do.call(rbind,sites)else data.frame()
   # Preserve selected-but-no-effect events as zero-site, zero-biomass log rows.
   # Sparse selected-cell mapping; never expand a landscape raster per event.
@@ -512,6 +537,7 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
   if (!identical(credited, plan$prescriptions$allocated_sites))
     stop("Effective quota credit does not match applied harvest", call.=FALSE)
   timer("journaux_et_quotas")
+  if (!is.null(report)) report(0.97, "Planting & establishment rules")
   plant <- do.call(rbind, planting)
   if (NROW(plant)) rownames(plant) <- NULL
   exclude <- as.integer(unlist(excluded, use.names = FALSE))

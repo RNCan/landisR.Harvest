@@ -16,7 +16,8 @@ harvest_plan_prescriptions(simulation, topology, prescriptions,
 harvest_step(simulation, topology, prescriptions, rules_by_prescription,
   history = NULL, year = simulation$year, seed = simulation$seed,
   rng_offset = 0, allocation_mode = c("corrected", "landis_compatible"),
-  harvest_timestep = simulation$project$canonical$timestep, damage_history = NULL)
+  harvest_timestep = simulation$project$canonical$timestep, damage_history = NULL,
+  progress = getOption("landisR.progress", interactive()))
 
 harvest_extension(management, prescriptions, rules_by_prescription,
   timestep = NULL, seed = NULL, rng_offset = 0,
@@ -77,6 +78,9 @@ harvest_extension(management, prescriptions, rules_by_prescription,
   Preserve the object with its attributes to carry pending repeat entries
   into the next call.}
   \item{year}{Year used to evaluate prescription dates and harvest history.}
+  \item{progress}{Show a console bar for planning and applying harvest.
+  Defaults to display in interactive sessions. For coupled runs, use
+  the progress argument of \code{landisR::landis_sim()}.}
   \item{seed}{Harvest RNG seed. The extension uses the simulation seed when
   \code{NULL}.}
   \item{rng_offset}{Number of draws already consumed in the standalone Harvest

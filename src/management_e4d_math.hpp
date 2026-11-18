@@ -84,7 +84,8 @@ inline Result select(
   const std::vector<double>& reserve_until = {},
   const RepeatPlan& repeat = {}, DamageHistory damage = {},
   const std::vector<int>& listed_sites = {},
-  bool landis_economic_order = false) {
+  bool landis_economic_order = false,
+  landis_progress::Reporter* progress = nullptr) {
   const auto offsets = prescription_offsets(mo, ps);
   const int ns=static_cast<int>(so.size())-1,nm=static_cast<int>(mo.size())-1,np=static_cast<int>(ps.size());
   if(ns<1||nm<1||np<1||so[0]!=0||mo[0]!=0||mo[nm]!=ns||
@@ -180,7 +181,9 @@ inline Result select(
     seen.resize(ns, 0);
     if (landis_economic_order) frontier_order.resize(ns, 0);
   }
+  if (progress) progress->start(0.56, 0.96, "Allocating harvest areas", nm);
   for(int m=0;m<nm;++m){
+    if (progress) progress->advance(m);
     // Scientific Random mode: each active Random prescription receives a
     // uniform random permutation of all stands in this MA, in raster order.
     // This is NOT a claim of event-by-event .NET RNG stream equivalence.

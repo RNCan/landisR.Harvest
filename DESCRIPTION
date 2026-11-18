@@ -1,7 +1,7 @@
 Package: landisR.harvest
 Type: Package
 Title: Experimental Native Living Biomass Harvest for landisR
-Version: 0.0.0.9032
+Version: 0.0.0.9034
 Authors@R: person("LANDIS-R", "Development", email="landisR-maintainer@example.invalid", role=c("aut","cre"))
 Description: Experimental native living-cohort removal and deterministic whole-stand allocation using the shared CSR forest state of landisR. H04-C2 adds deterministic
                   RegulateAges, inclusive MaximumAge and ForestTypeTable. H04-C3b adds a separate seed-plus-offset MT19937 Random pilot, with exact historical results
@@ -18,7 +18,7 @@ Description: Experimental native living-cohort removal and deterministic whole-s
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 4.3.0)
-Imports: Rcpp, landisR (>= 0.1.0.9012)
-LinkingTo: Rcpp, landisR
+Imports: Rcpp, landisR (>= 0.1.0.9015)
+LinkingTo: Rcpp, landisR (>= 0.1.0.9015)
 SystemRequirements: C++17
 NeedsCompilation: yes
