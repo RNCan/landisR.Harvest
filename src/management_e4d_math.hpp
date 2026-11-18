@@ -9,6 +9,7 @@
 #include <vector>
 #include "management_e2_math.hpp"
 #include "management_patch.hpp"
+#include <landisR/array_sort.hpp>
 namespace h04e4d {
 struct Prescription {
   int ma, min_age, max_age, first, last, adjacent_limit, adjacent_type, min_harvest_gap, ranking;
@@ -82,7 +83,8 @@ inline Result select(
   const PartialTopology& cell_topology = {},
   const std::vector<double>& reserve_until = {},
   const RepeatPlan& repeat = {}, DamageHistory damage = {},
-  const std::vector<int>& listed_sites = {}) {
+  const std::vector<int>& listed_sites = {},
+  bool landis_economic_order = false) {
   const auto offsets = prescription_offsets(mo, ps);
   const int ns=static_cast<int>(so.size())-1,nm=static_cast<int>(mo.size())-1,np=static_cast<int>(ps.size());
   if(ns<1||nm<1||np<1||so[0]!=0||mo[0]!=0||mo[nm]!=ns||
@@ -145,7 +147,7 @@ inline Result select(
     if (ps[j].target_fraction > 0 && year >= ps[j].first && year <= ps[j].last)
       prescriptions_by_area[ps[j].ma].push_back(j);
   std::vector<unsigned char> used(ns,0);
-  std::vector<std::size_t> seen;
+  std::vector<std::size_t> seen, frontier_order;
   std::vector<int> frontier, block;
   std::size_t attempt_id=0;
   int event_id = repeat.last_event_id;
@@ -174,22 +176,28 @@ inline Result select(
       [](const Prescription& p) { return p.patch_fraction > 0; }));
   std::vector<std::size_t> cell_ends;
   std::vector<int> filtered_cells;
-  if (std::any_of(ps.begin(), ps.end(), [](const Prescription& p) { return p.spread; }))
-    seen.resize(ns,0);
+  if (std::any_of(ps.begin(), ps.end(), [](const Prescription& p) { return p.spread; })) {
+    seen.resize(ns, 0);
+    if (landis_economic_order) frontier_order.resize(ns, 0);
+  }
   for(int m=0;m<nm;++m){
     // Scientific Random mode: each active Random prescription receives a
     // uniform random permutation of all stands in this MA, in raster order.
     // This is NOT a claim of event-by-event .NET RNG stream equivalence.
     std::vector<int> raster;
-    for (int j : prescriptions_by_area[m]) {
-      if (ps[j].ranking != 1) continue;
+    const auto raster_stands = [&]() -> const std::vector<int>& {
       if (raster.empty()) {
         raster.resize(mo[m + 1] - mo[m]);
         std::iota(raster.begin(), raster.end(), mo[m]);
         std::sort(raster.begin(), raster.end(), [&](int a, int b) { return first[a] < first[b]; });
       }
-      auto permutation=h04c3::landis_shuffle_ranks(static_cast<int>(raster.size()),rng);
-      for(std::size_t k=0;k<raster.size();++k)ranks[offsets[j] + (raster[k] - mo[m])]=permutation[k];
+      return raster;
+    };
+    for (int j : prescriptions_by_area[m]) {
+      if (ps[j].ranking != 1) continue;
+      const auto& stands = raster_stands();
+      auto permutation=h04c3::landis_shuffle_ranks(static_cast<int>(stands.size()),rng);
+      for(std::size_t k=0;k<stands.size();++k)ranks[offsets[j] + (stands[k] - mo[m])]=permutation[k];
     }
     std::vector<int> active;
     std::vector<std::vector<int>> ordered;
@@ -214,13 +222,27 @@ inline Result select(
         }
         if(ok)candidates.push_back(s);
       }
-      std::sort(candidates.begin(),candidates.end(),[&](int a,int b){
-        if(ranks[offsets[j] + (a - mo[m])]!=ranks[offsets[j] + (b - mo[m])])return ranks[offsets[j] + (a - mo[m])]>ranks[offsets[j] + (b - mo[m])];
-        return first[a]<first[b];
-      });
+      if (candidates.empty()) continue;
+      const auto rank_of = [&](int stand) { return ranks[offsets[j] + (stand - mo[m])]; };
+      if (landis_economic_order && p.ranking == 2 && p.spread && !p.partial) {
+        // The native sort starts with every stand in first raster occurrence
+        // order, including a zero rank for stands failing any requirement.
+        std::vector<int> all = raster_stands();
+        std::vector<double> eligible_rank(all.size(), 0.0);
+        for (int stand : candidates) eligible_rank[stand - mo[m]] = rank_of(stand);
+        landis_array_sort::landis_sort(all.data(), static_cast<int>(all.size()), [&](int a, int b) {
+          return eligible_rank[a - mo[m]] > eligible_rank[b - mo[m]];
+        });
+        candidates.assign(all.begin(), all.begin() + candidates.size());
+      } else {
+        std::sort(candidates.begin(), candidates.end(), [&](int a, int b) {
+          if (rank_of(a) != rank_of(b)) return rank_of(a) > rank_of(b);
+          return first[a] < first[b];
+        });
+      }
       out.eligible[j]=candidates.size();
       double goal=out.total_sites[m]*p.target_fraction;
-      if(!candidates.empty()&&goal>0){
+      if(goal>0){
         active.push_back(j);
         goals.push_back(goal);
         spread_eligibility.emplace_back();
@@ -343,13 +365,15 @@ inline Result select(
           subset = &filtered_cells;
         }
         auto &eligible=spread_eligibility[kchosen];
+        const bool discovery_order = landis_economic_order && prescription.ranking == 2 && !prescription.partial;
         const auto lower_priority=[&](int a,int b){
           if(ranks[offsets[j] + (a - mo[m])]!=ranks[offsets[j] + (b - mo[m])]) return ranks[offsets[j] + (a - mo[m])]<ranks[offsets[j] + (b - mo[m])];
-          return first[a]>first[b];
+          return discovery_order ? frontier_order[a] > frontier_order[b] : first[a] > first[b];
         };
         // A block grows through the highest ranked neighbor of any
         // member. Trial stands are reserved only after the minimum is met.
         ++attempt_id;
+        std::size_t next_frontier_order = 0;
         seen[initial]=attempt_id;
         frontier.clear();
         int block_sites=0;
@@ -400,6 +424,7 @@ inline Result select(
             if(neighbor<mo[m]||neighbor>=mo[m+1]||used[neighbor]||reserved(neighbor)||
                !eligible[neighbor-mo[m]]||seen[neighbor]==attempt_id) continue;
             seen[neighbor]=attempt_id;
+            if (discovery_order) frontier_order[neighbor] = next_frontier_order++;
             frontier.push_back(neighbor);
             std::push_heap(frontier.begin(),frontier.end(),lower_priority);
           }

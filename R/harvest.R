@@ -2,6 +2,11 @@
 # Read the shared CSR through the core and apply one sparse cohort edit.
 harvest_apply_cells <- function(simulation, cells, rules=NULL, clearcut=FALSE,
                                 preserve_cohort_order = FALSE) {
+  .harvest_apply_cells(simulation, cells, rules, clearcut, preserve_cohort_order)
+}
+
+.harvest_apply_cells <- function(simulation, cells, rules, clearcut,
+                                 preserve_cohort_order, timer = NULL) {
   .h04_sim(simulation)
   if (!is.logical(clearcut) || length(clearcut)!=1L || is.na(clearcut)) stop("Invalid clearcut")
   if (!is.numeric(cells) || anyNA(cells) || any(!is.finite(cells)) || any(cells!=trunc(cells)) || any(cells<1 | cells>.Machine$integer.max) || anyDuplicated(cells)) stop("cells must be unique integer IDs")
@@ -12,7 +17,9 @@ harvest_apply_cells <- function(simulation, cells, rules=NULL, clearcut=FALSE,
   sp <- as.character(forest$species)
   if (clearcut && !is.null(rules)) stop("clearcut and rules are mutually exclusive")
   rules <- .harvest_validate_rules(rules, sp)
+  if (!is.null(timer)) timer("validation_prelevements")
   ans <- .harvest_remove_at_positions(forest, ids, positions, sp, rules, clearcut)
+  if (!is.null(timer)) timer("prelevements_cpp")
   # Single commit, no expansion of unaffected cohorts; no RNG or time advance.
   if (length(ans$changed_cells)) {
     update <- landisR::landis_update(
@@ -21,7 +28,12 @@ harvest_apply_cells <- function(simulation, cells, rules=NULL, clearcut=FALSE,
       preserve_cohort_order = preserve_cohort_order,
       metadata = .harvest_apply_metadata(ans)
     )
+    if (!is.null(timer)) timer("preparation_ecriture_CSR")
     simulation <- landisR::landis_apply(simulation, update)
+    if (!is.null(timer)) timer("ecriture_CSR")
+    deaths <- ans$effects
+    simulation <- landisR::landis_schedule_regeneration(simulation, deaths[deaths$after == 0, ])
+    if (!is.null(timer)) timer("regeneration")
   }
   ans$simulation <- simulation
   ans

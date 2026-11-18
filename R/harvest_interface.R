@@ -1,6 +1,17 @@
 # Public interfaces for area-based harvest prescriptions.
 harvest_prepare <- function(simulation, management, prescriptions = NULL) {
-  topology <- harvest_prepare_adjacency_d2(simulation, harvest_prepare_management(simulation, management))
+  .harvest_prepare(simulation, management, prescriptions)
+}
+
+.harvest_native_economic_order <- function(prescriptions, allocation_mode) {
+  identical(allocation_mode, "landis_compatible") &&
+    any(prescriptions$ranking %in% "Economic" &
+        prescriptions$site_selection %in% c("CompleteStandSpread", "CompleteStandSpreading"))
+}
+
+.harvest_prepare <- function(simulation, management, prescriptions, landis_order = FALSE) {
+  topology <- .harvest_prepare_adjacency(simulation,
+    harvest_prepare_management(simulation, management), landis_order)
   if (any(.harvest_is_partial(prescriptions$site_selection) |
           prescriptions$site_selection %in% "PatchCutting"))
     topology <- .harvest_prepare_cell_topology(simulation, topology)
@@ -47,22 +58,26 @@ harvest_extension <- function(management, prescriptions, rules_by_prescription,
   force(seed)
   force(rng_offset)
   force(damage_history)
+  landis_order <- .harvest_native_economic_order(prescriptions, allocation_mode)
   if (!is.list(rules_by_prescription) || is.null(names(rules_by_prescription)) ||
       anyNA(names(rules_by_prescription)) || any(!nzchar(names(rules_by_prescription))) ||
       anyDuplicated(names(rules_by_prescription)))
     stop("rules_by_prescription doit \xeatre une liste de traitements nomm\xe9s.", call. = FALSE)
 
   initialize <- function(simulation) {
+    timer <- .harvest_timer("initialisation", simulation$year)
     core_step <- simulation$project$canonical$timestep
     interval <- if (is.null(timestep)) core_step else .h04_integer(timestep, "timestep")
     if (length(interval) != 1L || interval %% core_step != 0L)
       stop("timestep Harvest doit \xeatre un multiple positif du pas Succession.", call. = FALSE)
-    topology <- harvest_prepare(simulation, management, prescriptions)
+    topology <- .harvest_prepare(simulation, management, prescriptions, landis_order)
+    timer("topologie")
     harvest_seed <- if (is.null(seed)) simulation$seed else seed
     # The preview validates planner parameters without updating either RNG state.
     harvest_plan_prescriptions(simulation, topology, prescriptions, rules_by_prescription,
                                year = simulation$year, seed = harvest_seed, rng_offset = rng_offset,
                                allocation_mode = allocation_mode, harvest_timestep = interval)
+    timer("validation_plan_initial")
     active <- prescriptions$fraction > 0
     single <- prescriptions$repeat_type %in% "SingleRepeat"
     names_to_validate <- unique(c(as.character(prescriptions$prescription[active]),
@@ -73,6 +88,8 @@ harvest_extension <- function(management, prescriptions, rules_by_prescription,
         stop("Traitement manquant pour la prescription ", name, ".", call. = FALSE)
       .harvest_treatment(rules_by_prescription[[name]], species)
     }
+    timer("validation_traitements")
+    timer()
     list(topology = topology, history = NULL, seed = harvest_seed,
          rng_offset = rng_offset, timestep = interval)
   }
@@ -80,6 +97,8 @@ harvest_extension <- function(management, prescriptions, rules_by_prescription,
   step <- function(simulation, state, year) {
     if (year %% state$timestep != 0L)
       return(list(simulation = simulation, state = state))
+    if (landis_order && is.null(state$topology$d2_neighbors$landis_order))
+      state$topology <- .harvest_prepare_adjacency(simulation, state$topology, landis_order = TRUE)
     result <- harvest_step(simulation, state$topology, prescriptions, rules_by_prescription,
                            history = state$history, year = year, seed = state$seed,
                            rng_offset = if (is.null(simulation$landis_rng)) state$rng_offset else 0,

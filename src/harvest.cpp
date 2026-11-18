@@ -85,7 +85,8 @@ extern "C" SEXP h04d2_plan(SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEX
 extern "C" SEXP h04e2_plan(SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP);
 extern "C" SEXP h04e3_plan(SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP);
 extern "C" SEXP h04e4d_plan(SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP,SEXP);
-static const R_CallMethodDef calls[]={{"h03_apply",(DL_FUNC)&h03_apply,10},{"h04_plan",(DL_FUNC)&h04_plan,7},{"h04b2_plan",(DL_FUNC)&h04b2_plan,12},{"h04c2_plan",(DL_FUNC)&h04c2_plan,23},{"h04c3_random_plan",(DL_FUNC)&h04c3_random_plan,11},{"h04d2_topology",(DL_FUNC)&h04d2_topology,4},{"h05_cell_topology",(DL_FUNC)&h05_cell_topology,4},{"h04d2_plan",(DL_FUNC)&h04d2_plan,16},{"h04e2_plan",(DL_FUNC)&h04e2_plan,16},{"h04e3_plan",(DL_FUNC)&h04e3_plan,13},{"h04e4d_plan",(DL_FUNC)&h04e4d_plan,13},{NULL,NULL,0}};
+extern "C" SEXP h04e4d_plan_cells(SEXP,SEXP,SEXP,SEXP,SEXP);
+static const R_CallMethodDef calls[]={{"h03_apply",(DL_FUNC)&h03_apply,10},{"h04_plan",(DL_FUNC)&h04_plan,7},{"h04b2_plan",(DL_FUNC)&h04b2_plan,12},{"h04c2_plan",(DL_FUNC)&h04c2_plan,23},{"h04c3_random_plan",(DL_FUNC)&h04c3_random_plan,11},{"h04d2_topology",(DL_FUNC)&h04d2_topology,4},{"h05_cell_topology",(DL_FUNC)&h05_cell_topology,4},{"h04d2_plan",(DL_FUNC)&h04d2_plan,16},{"h04e2_plan",(DL_FUNC)&h04e2_plan,16},{"h04e3_plan",(DL_FUNC)&h04e3_plan,13},{"h04e4d_plan",(DL_FUNC)&h04e4d_plan,13},{"h04e4d_plan_cells",(DL_FUNC)&h04e4d_plan_cells,5},{NULL,NULL,0}};
 extern "C" void attribute_visible R_init_landisR_harvest(DllInfo* dll) {
  R_registerRoutines(dll,NULL,calls,NULL,NULL); R_useDynamicSymbols(dll,FALSE);
 }

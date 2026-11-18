@@ -1,10 +1,12 @@
 #include <Rcpp.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <numeric>
 #include <unordered_map>
 #include <utility>
+#include <tuple>
 #include <vector>
 #include "management_b2_math.hpp"
 #include "management_partial.hpp"
@@ -15,7 +17,7 @@ using namespace Rcpp;
 RcppExport SEXP h04d2_topology(SEXP ids_, SEXP pos_, SEXP so_, SEXP dims_) {
  BEGIN_RCPP
  IntegerVector ids(ids_), pos(pos_), so(so_), dims(dims_);
- if(dims.size()!=2 || dims[0]<1 || dims[1]<1 || so.size()<2 || so[0]!=0 ||
+ if((dims.size()!=2 && dims.size()!=3) || dims[0]<1 || dims[1]<1 || so.size()<2 || so[0]!=0 ||
     so[so.size()-1]!=pos.size())stop("Invalid adjacency topology");
  const int nr=dims[0],nc=dims[1],nst=so.size()-1;
  std::unordered_map<int,int> index;index.reserve(ids.size()*2+1);
@@ -46,7 +48,39 @@ RcppExport SEXP h04d2_topology(SEXP ids_, SEXP pos_, SEXP so_, SEXP dims_) {
  for(const auto &e:edges)++offsets[e.first+1];
  for(int s=0;s<nst;++s)offsets[s+1]+=offsets[s];
  for(std::size_t j=0;j<edges.size();++j)values[j]=edges[j].second;
- return List::create(_["offsets"]=offsets,_["indices"]=values,_["first_position"]=first);
+ List ans = List::create(_["offsets"]=offsets,_["indices"]=values,_["first_position"]=first);
+ if (dims.size() == 3 && dims[2] != 0) {
+   // Store the first time each side of a stand boundary was seen in the
+   // LANDIS-II raster scan. Each cell checks the upper then left side.
+   using Edge = std::tuple<int, int, std::uint64_t>;
+   std::vector<Edge> discovery;
+   discovery.reserve(edges.size());
+   for (const auto& cell : index) {
+     const int id = cell.first;
+     const int row = (id - 1) % nr, col = (id - 1) / nr, stand = cell.second;
+     const int earlier[] = {row > 0 ? id - 1 : 0, col > 0 ? id - nr : 0};
+     for (int direction = 0; direction < 2; ++direction) {
+       const auto neighbor = index.find(earlier[direction]);
+       if (neighbor == index.end() || neighbor->second == stand) continue;
+       const auto order = 2 * (static_cast<std::uint64_t>(row) * nc + col) + direction;
+       discovery.emplace_back(stand, neighbor->second, order);
+       discovery.emplace_back(neighbor->second, stand, order);
+     }
+   }
+   std::sort(discovery.begin(), discovery.end());
+   discovery.erase(std::unique(discovery.begin(), discovery.end(), [](const Edge& a, const Edge& b) {
+     return std::get<0>(a) == std::get<0>(b) && std::get<1>(a) == std::get<1>(b);
+   }), discovery.end());
+   if (discovery.size() != edges.size()) stop("Inconsistent stand adjacency order");
+   IntegerVector ordered(values.size());
+   for (int s = 0; s < nst; ++s) {
+     const auto begin = discovery.begin() + offsets[s], end = discovery.begin() + offsets[s + 1];
+     std::sort(begin, end, [](const Edge& a, const Edge& b) { return std::get<2>(a) < std::get<2>(b); });
+     for (int i = offsets[s]; i < offsets[s + 1]; ++i) ordered[i] = std::get<1>(discovery[i]);
+   }
+   ans["landis_order"] = ordered;
+ }
+ return ans;
  END_RCPP
 }
 

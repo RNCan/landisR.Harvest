@@ -89,7 +89,9 @@ harvest_extension(management, prescriptions, rules_by_prescription,
   mode allows every candidate cell to be drawn. With PatchCutting, it also
   completes eligible queued cells when the candidate list is exhausted and
   stops drawing starts once the stand target is met. The compatible mode reproduces the observed
-  absence of a reservation effect in LANDIS-II v7.}
+  absence of a reservation effect in LANDIS-II v7. With \code{Economic} ranking and
+  \code{CompleteStandSpread}, it also reproduces the LANDIS-II v7 ordering for
+  equal ranks and adds equally ranked adjacent stands to the block in discovery order.}
   \item{harvest_timestep}{Harvest interval for a manual planning or harvest
   loop. By default it is the succession interval. Use the same interval
   in all calls.}

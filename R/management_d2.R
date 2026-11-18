@@ -4,13 +4,17 @@
 # simulation/R RNG mutation and no whole-landscape journal per harvest.
 # AdjacencyNeighborSetAside has no effect for SiteSelection Complete in v7.
 harvest_prepare_adjacency_d2 <- function(simulation, topology) {
+  .harvest_prepare_adjacency(simulation, topology)
+}
+
+.harvest_prepare_adjacency <- function(simulation, topology, landis_order = FALSE) {
   .h04_sim(simulation)
   forest <- landisR::landis_csr(simulation)
   if(!inherits(topology,"landisR_h04_topology") ||
      !identical(topology$ids,as.integer(forest$cell_id)))
     stop("Topology does not match current landscape",call.=FALSE)
   ans <- .Call("h04d2_topology",as.integer(topology$ids),topology$positions,
-    topology$stand_offsets,as.integer(c(forest$nrow,forest$ncol)),
+    topology$stand_offsets,as.integer(c(forest$nrow, forest$ncol, landis_order)),
     PACKAGE="landisR.harvest")
   topology$d2_neighbors <- ans
   topology

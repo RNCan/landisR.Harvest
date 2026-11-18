@@ -19,6 +19,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
                             allocation_mode=c("corrected","landis_compatible"),
                             rules_by_prescription=NULL,
                             harvest_timestep=simulation$project$canonical$timestep, damage_history=NULL) {
+  timer <- .harvest_timer("planification_R", year)
   .h04_sim(simulation)
   forest <- landisR::landis_csr(simulation)
   allocation_mode <- match.arg(allocation_mode)
@@ -312,22 +313,27 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     cfg$rule_index <- as.integer(rule_index - 1L)
   }
   # One batched native pass over all existing shared living CSR states.
+  cfg$landis_economic_order <- .harvest_native_economic_order(p, allocation_mode)
+  neighbors <- topology$d2_neighbors
+  if (cfg$landis_economic_order && is.null(neighbors$landis_order)) {
+    neighbors <- .harvest_prepare_adjacency(simulation, topology, landis_order = TRUE)$d2_neighbors
+  }
+  timing <- getOption("landisR.harvest.timing")
+  if (is.environment(timing)) cfg$timing <- TRUE
+  timer("preparation_prescriptions")
   nat<-.Call("h04e4d_plan",forest$states,forest$cell_state,
     topology$positions,topology$stand_offsets,topology$ma_offsets,
-    topology$d2_neighbors$offsets,topology$d2_neighbors$indices,
+    neighbors$offsets, if (cfg$landis_economic_order) neighbors$landis_order else neighbors$indices,
     topology$d2_neighbors$first_position,cfg,last,
     as.numeric(year),as.numeric(landis_seed),as.numeric(landis_rng_offset),
     PACKAGE="landisR.harvest")
+  timer("planification_cpp")
+  if (!is.null(nat$timing))
+    .harvest_record_timing(timing, "planification_cpp", year, nat$timing)
   s<-as.integer(nat$selected_stands);j<-as.integer(nat$prescription_indices)
-  loc <- lapply(seq_along(s), function(row) {
-    selected <- nat$partial_cells[[row]]
-    if (is.null(selected)) {
-      stand <- s[row]
-      index <- seq.int(topology$stand_offsets[stand]+1L, topology$stand_offsets[stand+1L])
-      selected <- topology$positions[index]
-    }
-    as.integer(topology$ids[selected+1L])
-  })
+  selected <- .Call("h04e4d_plan_cells", s, nat$partial_cells,
+                    topology$stand_offsets, topology$positions, topology$ids,
+                    PACKAGE = "landisR.harvest")
   events<-data.frame(EventID=as.integer(nat$event_ids),Time=rep.int(as.integer(year),length(s)),
     ManagementArea=topology$stands$management_area[s],Prescription=p$prescription[j],
     Stand=topology$stands$stand[s],StandAge=as.integer(nat$event_age),
@@ -336,7 +342,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     rng_uniform=as.numeric(nat$draw_uniform),
     selection_probability=as.numeric(nat$selection_probability),
     stringsAsFactors=FALSE)
-  events$prescription_row<-j;events$cells<-I(loc)
+  events$prescription_row<-j;events$cells<-I(selected$by_event)
   if (!is.null(repeats)) {
     events$RepeatNumber <- as.integer(nat$repeat_numbers)
     events$treatment <- events$Prescription
@@ -368,7 +374,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     "H04-E4d pilot: Random/MaxCohortAge Complete, multiple prescriptions, per-rule adjacency/history/Required forest type"
   }
   plan <- list(type=plan_type,
-    year=as.integer(year),events=events,cells=as.integer(unlist(loc,use.names=FALSE)),
+    year=as.integer(year),events=events,cells=selected$all_cells,
     history=history_out,
     prescriptions=within(p,{allocated_sites<-as.integer(nat$allocated_sites);
       eligible_stands<-as.integer(nat$eligible_stands);
@@ -380,6 +386,8 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
     draws_consumed=as.numeric(nat$draws_consumed))
   if (!is.null(shared))
     plan$landis_rng <- list(state = nat$landis_rng_state, offset = plan$landis_rng_offset_end)
+  timer("construction_plan")
+  timer()
   plan
 }
 
@@ -398,6 +406,7 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
 
 .harvest_apply_plan_e4d <- function(simulation, plan, rules_by_prescription, allocation_mode,
                                      batch = TRUE) {
+  timer <- .harvest_timer("application", plan$year)
   forest <- landisR::landis_csr(simulation)
   events <- plan$events
   chosen <- unique(as.character(events$Prescription))
@@ -418,25 +427,34 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
   effects <- sites <- planting <- planted_species <- excluded <- list()
   replacement <- cleared <- journal <- vector("list", length(chosen))
   species <- as.character(forest$species)
+  timer("indexation_cellules")
   for (i in seq_along(chosen)) {
     pres <- chosen[i]
     k <- event_groups[[i]]
     target <- as.integer(unlist(events$cells[k], use.names = FALSE))
-    if (!length(target)) next
+    if (!length(target)) {
+      timer("preparation_traitements")
+      next
+    }
     treatment_name <- if ("treatment" %in% names(events)) events$treatment[k[1L]] else pres
     treatment <- .harvest_treatment(rules_by_prescription[[treatment_name]], species)
+    timer("preparation_traitements")
     if (batch) {
       indices <- sequence(event_sizes[k], from = event_starts[k])
+      timer("indexation_cellules")
       res <- .harvest_remove_at_positions(forest, as.integer(forest$cell_id),
                                           positions[indices], species, treatment$rules)
+      timer("prelevements_cpp")
       if (length(res$changed_cells)) {
         replacement[[i]] <- res$replacement
         cleared[[i]] <- res$clear_cells
         journal[[i]] <- .harvest_apply_metadata(res)
       }
+      timer("preparation_ecriture_CSR")
     } else {
-      res <- harvest_apply_cells(current, target, rules = treatment$rules,
-                                 preserve_cohort_order = preserve_order)
+      res <- .harvest_apply_cells(current, target, rules = treatment$rules,
+                                  clearcut = FALSE, preserve_cohort_order = preserve_order,
+                                  timer = timer)
       current <- res$simulation
     }
     if (length(treatment$plant)) {
@@ -450,13 +468,23 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
       excluded[[pres]] <- res$changed_cells
     effects[[pres]]<-res$effects
     z<-res$sites;z$prescription<-pres;sites[[pres]]<-z
+    timer("preparation_effets_et_plantation")
   }
   if (batch && any(lengths(journal))) {
+    cohorts <- do.call(rbind, replacement)
+    clear_cells <- as.integer(unlist(cleared, use.names = FALSE))
+    event_metadata <- Filter(Negate(is.null), journal)
+    timer("preparation_ecriture_CSR")
     current <- landisR::landis_apply_cohort_batch(
-      simulation, cohorts = do.call(rbind, replacement),
-      clear_cells = as.integer(unlist(cleared, use.names = FALSE)),
-      event_metadata = Filter(Negate(is.null), journal),
+      simulation, cohorts = cohorts, clear_cells = clear_cells,
+      event_metadata = event_metadata,
       preserve_cohort_order = TRUE)
+    timer("ecriture_CSR")
+    if (landisR::landis_deferred_regeneration(current)) {
+      deaths <- do.call(rbind, effects)
+      current <- landisR::landis_schedule_regeneration(current, deaths[deaths$after == 0, ])
+      timer("regeneration")
+    }
   }
   all_sites<-if(length(sites))do.call(rbind,sites)else data.frame()
   # Preserve selected-but-no-effect events as zero-site, zero-biomass log rows.
@@ -483,6 +511,7 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
   }
   if (!identical(credited, plan$prescriptions$allocated_sites))
     stop("Effective quota credit does not match applied harvest", call.=FALSE)
+  timer("journaux_et_quotas")
   plant <- do.call(rbind, planting)
   if (NROW(plant)) rownames(plant) <- NULL
   exclude <- as.integer(unlist(excluded, use.names = FALSE))
@@ -494,8 +523,12 @@ harvest_step_e4d <- function(simulation,topology,prescriptions,rules_by_prescrip
   }
   if (NROW(plant) || length(exclude))
     current <- landisR::landis_schedule_establishment(current, plant, exclude)
+  timer("plantation_et_exclusion")
   if (!is.null(plan$landis_rng)) current$landis_rng <- plan$landis_rng
-  list(simulation=current,plan=plan,events=ev,history=plan$history,
+  out <- list(simulation=current,plan=plan,events=ev,history=plan$history,
     effects=if(length(effects))do.call(rbind,effects)else data.frame(),
     sites=all_sites,landis_rng_offset_end=plan$landis_rng_offset_end)
+  timer("assemblage_sorties")
+  timer()
+  out
 }

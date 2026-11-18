@@ -1,5 +1,6 @@
 #include <Rcpp.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <unordered_map>
@@ -17,6 +18,10 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
  SEXP year_, SEXP seed_, SEXP offset_) {
  BEGIN_RCPP
  List states(states_),cfg(config_);
+ using Clock = std::chrono::steady_clock;
+ using Seconds = std::chrono::duration<double>;
+ const bool timing = cfg.containsElementNamed("timing") && as<bool>(cfg["timing"]);
+ const auto start = timing ? Clock::now() : Clock::time_point{};
  IntegerVector cs(cell_state_),pos(pos_),so(so_),mo(mo_),no(no_),ni(ni_),first(first_),history(history_);
  IntegerVector ma=as<IntegerVector>(cfg["ma"]),lo=as<IntegerVector>(cfg["min_age"]),
    hi=as<IntegerVector>(cfg["max_age"]),beg=as<IntegerVector>(cfg["begin"]),
@@ -288,6 +293,7 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
  std::vector<unsigned char> qualifies(prescription_offsets.back(),1);
  std::vector<int> counts(filters.size(),0);
  int management_area=0;
+ const auto analyse_start = timing ? Clock::now() : Clock::time_point{};
  for(int s=0;s<ns;++s){
    if(s%4096==0)checkUserInterrupt();
    if(so[s]>=so[s+1]||so[s]<0||so[s+1]>pos.size())stop("Invalid E3 stand offsets");
@@ -357,6 +363,7 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
      else ranks[ix] = 0;
    }
  }
+ const auto analyse_end = timing ? Clock::now() : Clock::time_point{};
  std::vector<int> normalized_history=as<std::vector<int>>(history);
  for(int &v:normalized_history)if(v==NA_INTEGER)v=-1;
  h04e4d::PartialTopology cell_topology;
@@ -386,11 +393,14 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
    rng.restore(as<std::string>(cfg["landis_rng_state"]));
    rng.draws = offset;
  }
+ const auto select_start = timing ? Clock::now() : Clock::time_point{};
  h04e4d::Result out=h04e4d::select(
    as<std::vector<int>>(so),as<std::vector<int>>(mo),
    as<std::vector<int>>(no),as<std::vector<int>>(ni),
    as<std::vector<int>>(first),age,std::move(ranks),qualifies,params,normalized_history,
-   static_cast<int>(yearv[0]),rng,effective_sites,cell_area_ha,cell_topology,reserve_until,repeat,std::move(damage),listed_sites);
+   static_cast<int>(yearv[0]),rng,effective_sites,cell_area_ha,cell_topology,reserve_until,repeat,std::move(damage),listed_sites,
+   cfg.containsElementNamed("landis_economic_order") && as<bool>(cfg["landis_economic_order"]));
+ const auto select_end = timing ? Clock::now() : Clock::time_point{};
  IntegerVector selected(out.events.size()),pres(out.events.size()),maevents(out.events.size()),
    event_age(out.events.size()),sites(out.events.size()),event_ids(out.events.size());
  NumericVector draw(out.events.size()),uniform(out.events.size()),probability(out.events.size()),event_rank(out.events.size());
@@ -441,6 +451,15 @@ RcppExport SEXP h04e4d_plan(SEXP states_, SEXP cell_state_, SEXP pos_, SEXP so_,
    }
    result["harvest_damage_positions"] = visited;
    result["harvest_damage_year"] = years;
+ }
+ if (timing) {
+   result["timing"] = NumericVector::create(
+     _["validation_et_caches"] = Seconds(analyse_start - start).count(),
+     _["analyse_peuplements"] = Seconds(analyse_end - analyse_start).count(),
+     _["preparation_selection"] = Seconds(select_start - analyse_end).count(),
+     _["classement_et_selection"] = Seconds(select_end - select_start).count(),
+     _["construction_sorties"] = Seconds(Clock::now() - select_end).count()
+   );
  }
  return result;
  END_RCPP
