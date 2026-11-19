@@ -18,7 +18,7 @@ harvest_read(path, project, scenario_directory = dirname(path),
 \description{
 Read a Biomass Harvest parameter file and the two spatial inputs it
 references. Join the maps to the active cell IDs of a landisR project and
-prepare the tables accepted by \code{\link{harvest_extension}}.
+build the parameters with \code{\link{harvest_build}}.
 }
 \details{
 The reader supports the LANDIS-II syntax used by the 6est scenario:
@@ -35,7 +35,9 @@ management-area values on active cells are assigned an unmanaged sector
 code. Each active cell requires a positive stand code.
 }
 \value{
-A list with \code{management} (\code{cell_id}, \code{management_area},
+A \code{landisR_harvest_parameters} object for the \code{parameters}
+argument of \code{\link{harvest_extension}}. It is a list with
+\code{management} (\code{cell_id}, \code{management_area},
 \code{stand}), \code{prescriptions} (including a list column of economic
 ranking tables), \code{rules_by_prescription} (named cohort-removal
 tables), and \code{timestep} (years).
@@ -45,10 +47,7 @@ tables), and \code{timestep} (years).
 harvest <- harvest_read("inputs/biomass-harvest.txt", project,
   scenario_directory = "scenario", raster_template = "inputs/ecoregions.tif")
 extension_harvest <- harvest_extension(
-  management = harvest$management,
-  prescriptions = harvest$prescriptions,
-  rules_by_prescription = harvest$rules_by_prescription,
-  timestep = harvest$timestep,
+  parameters = harvest,
   allocation_mode = "landis_compatible"
 )
 }

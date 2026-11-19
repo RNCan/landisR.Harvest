@@ -1,10 +1,13 @@
 \name{harvest_step}
 \alias{harvest_prepare}
+\alias{harvest_build}
 \alias{harvest_plan_prescriptions}
 \alias{harvest_step}
 \alias{harvest_extension}
 \title{Prepare, plan and apply biomass harvest prescriptions}
 \usage{
+harvest_build(timestep = NULL, management, prescriptions, rules_by_prescription)
+
 harvest_prepare(simulation, management, prescriptions = NULL)
 
 harvest_plan_prescriptions(simulation, topology, prescriptions,
@@ -21,10 +24,15 @@ harvest_step(simulation, topology, prescriptions, rules_by_prescription,
 
 harvest_extension(management, prescriptions, rules_by_prescription,
   timestep = NULL, seed = NULL, rng_offset = 0,
-  allocation_mode = c("corrected", "landis_compatible"), damage_history = NULL)
+  allocation_mode = c("corrected", "landis_compatible"), damage_history = NULL,
+  parameters = NULL)
 }
 \arguments{
   \item{simulation}{Initialized landisR simulation.}
+  \item{parameters}{Optional parameter object from \code{harvest_build()} or
+  \code{\link{harvest_read}}.
+  Supply the object alone for the management tables and timestep, or supply
+  those arguments directly to \code{harvest_extension()}.}
   \item{management}{Data frame with \code{cell_id}, \code{management_area}
   and \code{stand}, with one row per active cell.}
   \item{topology}{Result of \code{harvest_prepare()}.}
@@ -109,6 +117,12 @@ harvest_extension(management, prescriptions, rules_by_prescription,
   interval. A supplied interval must be a positive multiple of it.}
 }
 \description{
+\code{harvest_build()} constructs parameters from tables in R. It checks
+the management columns, the basic prescription fields and the referenced
+treatment rules. Coupled initialization prepares the topology and checks
+the landscape cell IDs, species codes, timestep and planner options
+against the simulation.
+
 The planner supports area quotas with Complete, CompleteStandSpread and
 PartialStandSpread or PatchCutting, with Random, MaxCohortAge or Economic ranking. CompleteStandSpread
 adds whole eligible stands in the same management area, in rank order
@@ -182,6 +196,8 @@ v7 runs. Compatible periodic spread uses the historical reserved-stand
 selector behavior inferred from the HarvestManagement implementation.
 }
 \value{
+\code{harvest_build()} returns a \code{landisR_harvest_parameters} object
+for the \code{parameters} argument of \code{harvest_extension()}.
 \code{harvest_prepare()} returns the topology. \code{harvest_plan_prescriptions()}
 returns a plan. \code{harvest_step()} returns the updated simulation, plan,
 events, history, effects, sites and next Harvest RNG offset. When the
@@ -208,7 +224,8 @@ simulation carries these directives into the next \code{landisR::landis_step()}.
 \code{harvest_extension()} returns a descriptor for the \code{extensions}
 argument of \code{landisR::landis_sim()}.
 }
-\seealso{\code{harvest_plan()}, \code{harvest_plan_c2()}, \code{harvest_plan_c3()},
+\seealso{\code{\link{harvest_read}}, \code{harvest_plan()},
+\code{harvest_plan_c2()}, \code{harvest_plan_c3()},
 \code{harvest_plan_d2()} for earlier qualified configurations.}
 
 \examples{
@@ -234,8 +251,10 @@ cut <- harvest_step(sim, topology, prescriptions, rules, year = 10L,
   progress = FALSE)
 cut$events
 
-# Alternatively let the core schedule harvest before succession.
-harvest <- harvest_extension(management, prescriptions, rules)
+# Build from tables and let the core schedule harvest before succession.
+parameters <- harvest_build(timestep = 10L, management = management,
+  prescriptions = prescriptions, rules_by_prescription = rules)
+harvest <- harvest_extension(parameters = parameters)
 run <- landisR::landis_sim(sim, steps = 1L, extensions = list(harvest = harvest),
   progress = FALSE)
 run$events$harvest[["10"]]

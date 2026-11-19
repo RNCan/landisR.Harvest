@@ -12,6 +12,34 @@
   site_selection %in% c("PartialStandSpread", "PartialStandSpreading")
 }
 
+.harvest_validate_prescriptions <- function(prescriptions) {
+  required <- c("management_area", "prescription", "fraction", "ranking", "target_type",
+                "minimum_age", "maximum_age", "begin_time", "end_time", "site_selection")
+  if (!is.data.frame(prescriptions) || !nrow(prescriptions) ||
+      !all(required %in% names(prescriptions)))
+    stop("prescriptions requires a nonempty table with: ",
+         paste(required, collapse = ", "), call. = FALSE)
+  p <- prescriptions
+  for (name in c("management_area", "minimum_age", "maximum_age", "begin_time", "end_time"))
+    p[[name]] <- .h04_integer(p[[name]], name, 0L)
+  for (name in c("prescription", "ranking", "target_type", "site_selection"))
+    p[[name]] <- as.character(p[[name]])
+  if (anyNA(p$prescription) || any(!nzchar(p$prescription)) ||
+      anyNA(p$ranking) || any(!p$ranking %in% c("MaxCohortAge", "Random", "Economic")) ||
+      anyNA(p$target_type) || any(p$target_type != "area") ||
+      anyNA(p$site_selection) ||
+      any(!p$site_selection %in% c("Complete", "CompleteStandSpread", "CompleteStandSpreading") &
+          !.harvest_is_partial(p$site_selection) & p$site_selection != "PatchCutting"))
+    stop("Expected MaxCohortAge, Random or Economic ranking and a supported site selection with area quotas",
+         call. = FALSE)
+  if (!is.numeric(p$fraction) || anyNA(p$fraction) || any(!is.finite(p$fraction)) ||
+      any(p$fraction < 0 | p$fraction > 1) ||
+      any(p$maximum_age < p$minimum_age) || any(p$end_time < p$begin_time) ||
+      anyDuplicated(p[c("management_area", "prescription")]))
+    stop("Invalid prescription target/age/period/duplicate", call. = FALSE)
+  p
+}
+
 # Mixed Random/MaxCohortAge prescriptions for living cohorts.
 harvest_plan_e4d <- function(simulation, topology, prescriptions,
                             history=NULL, year=simulation$year,
@@ -43,23 +71,7 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
   if(is.null(topology$d2_neighbors)||!inherits(topology,"landisR_h04_topology")||
      !identical(topology$ids,as.integer(forest$cell_id)))
     stop("Call harvest_prepare_adjacency_d2(simulation,topology) first",call.=FALSE)
-  required<-c("management_area","prescription","fraction","ranking","target_type",
-    "minimum_age","maximum_age","begin_time","end_time","site_selection")
-  if(!is.data.frame(prescriptions)||!nrow(prescriptions)||!all(required%in%names(prescriptions)))
-    stop("prescriptions must provide E2 columns",call.=FALSE)
-  p<-prescriptions
-  integers<-c("management_area","minimum_age","maximum_age","begin_time","end_time")
-  for(name in integers)p[[name]]<-.h04_integer(p[[name]],name,0L)
-  for(name in c("prescription","ranking","target_type","site_selection"))
-    p[[name]]<-as.character(p[[name]])
-  if(anyNA(p$prescription)||any(!nzchar(p$prescription))||
-     anyNA(p$ranking)||any(!p$ranking%in%c("MaxCohortAge","Random","Economic"))||
-     anyNA(p$target_type)||any(p$target_type!="area")||
-     anyNA(p$site_selection)||
-     any(!p$site_selection %in% c("Complete", "CompleteStandSpread", "CompleteStandSpreading") &
-         !.harvest_is_partial(p$site_selection) & p$site_selection != "PatchCutting"))
-    stop("Expected MaxCohortAge, Random or Economic ranking and a supported site selection with area quotas",
-         call.=FALSE)
+  p <- .harvest_validate_prescriptions(prescriptions)
   patch <- p$site_selection == "PatchCutting"
   spreading <- p$site_selection != "Complete" & !patch
   partial <- .harvest_is_partial(p$site_selection)
@@ -93,11 +105,6 @@ harvest_plan_e4d <- function(simulation, topology, prescriptions,
   if (any(spreading & (max_block_ha <= 0 | max_block_ha < min_block_ha)))
     stop("Stand spreading requires max_block_ha > 0 and max_block_ha >= min_block_ha",
          call.=FALSE)
-  if(!is.numeric(p$fraction)||anyNA(p$fraction)||any(!is.finite(p$fraction))||
-     any(p$fraction<0|p$fraction>1)||
-     any(p$maximum_age<p$minimum_age)||any(p$end_time<p$begin_time)||
-     anyDuplicated(p[c("management_area","prescription")]))
-    stop("Invalid prescription target/age/period/duplicate",call.=FALSE)
   if(any(!p$management_area%in%topology$management_areas))
     stop("Unknown management area in prescriptions",call.=FALSE)
   if(allocation_mode=="landis_compatible" && any(p$fraction==0))

@@ -25,6 +25,7 @@ export(harvest_plan_e4d)
 export(harvest_step_e4d)
 
 export(harvest_prepare)
+export(harvest_build)
 export(harvest_plan_prescriptions)
 export(harvest_step)
 export(harvest_extension)

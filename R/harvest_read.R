@@ -103,9 +103,12 @@ harvest_read <- function(path, project, scenario_directory = dirname(path),
   if (any(stand == 0L))
     stop("Each active landscape cell requires a positive stand code.", call. = FALSE)
 
-  list(management = data.frame(cell_id = cells$cell_id, management_area = area, stand = stand),
-       prescriptions = prescriptions,
-       rules_by_prescription = lapply(blocks, `[[`, "rules"), timestep = timestep)
+  harvest_build(
+    timestep = timestep,
+    management = data.frame(cell_id = cells$cell_id, management_area = area, stand = stand),
+    prescriptions = prescriptions,
+    rules_by_prescription = lapply(blocks, `[[`, "rules")
+  )
 }
 
 .harvest_read_number <- function(x, label, whole = FALSE) {

@@ -8,10 +8,15 @@
   if (!inherits(s, "landisR_simulation") || !identical(s$format, "landisR/simulation-v1"))
     stop("Harvest requires a landisR simulation with format landisR/simulation-v1.", call. = FALSE)
 }
+.harvest_check_management_columns <- function(management) {
+  if (!is.data.frame(management) ||
+      !all(c("cell_id", "management_area", "stand") %in% names(management)))
+    stop("management requires cell_id, management_area, stand", call. = FALSE)
+}
 harvest_prepare_management <- function(simulation, management) {
   .h04_sim(simulation)
   forest <- landisR::landis_csr(simulation)
-  if(!is.data.frame(management)||!all(c("cell_id","management_area","stand")%in%names(management))) stop("management requires cell_id, management_area, stand")
+  .harvest_check_management_columns(management)
   ids <- as.integer(forest$cell_id)
   if(!length(ids)) stop("Empty landscape")
   cell <- .h04_integer(management$cell_id,"cell_id"); ma <- .h04_integer(management$management_area,"management_area"); st <- .h04_integer(management$stand,"stand")

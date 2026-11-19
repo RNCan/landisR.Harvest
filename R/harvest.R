@@ -53,10 +53,12 @@ harvest_apply_cells <- function(simulation, cells, rules=NULL, clearcut=FALSE,
        removed_g_m2_sum = sum(result$sites$removed_g_m2))
 }
 
-.harvest_validate_rules <- function(rules, sp) {
+.harvest_validate_rules <- function(rules, sp = NULL) {
   if (is.null(rules)) rules <- data.frame(species=character(),age_min=numeric(),age_max=numeric(),fraction=numeric())
   if (!is.data.frame(rules) || !all(c("species","age_min","age_max","fraction") %in% names(rules))) stop("Invalid rules table")
-  if (!is.character(rules$species) || anyNA(rules$species) || any(!rules$species %in% sp)) stop("Unknown rule species")
+  if (!is.character(rules$species) || anyNA(rules$species) ||
+      any(!nzchar(rules$species)) || (!is.null(sp) && any(!rules$species %in% sp)))
+    stop("Unknown rule species", call. = FALSE)
   for (k in c("age_min","age_max","fraction")) if (!is.numeric(rules[[k]]) || any(!is.finite(rules[[k]]))) stop("Invalid rule values: ",k)
   if (any(rules$age_min<1 | rules$age_min!=trunc(rules$age_min) | rules$age_max<rules$age_min | rules$age_max!=trunc(rules$age_max) | rules$fraction<0 | rules$fraction>1)) stop("Invalid age range or fraction")
   for (s in unique(rules$species)) {

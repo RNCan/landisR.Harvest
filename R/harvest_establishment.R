@@ -1,5 +1,5 @@
 # Accept the original removal table or a treatment with establishment directives.
-.harvest_treatment <- function(treatment, species) {
+.harvest_treatment <- function(treatment, species = NULL) {
   plant <- character()
   prevent <- FALSE
   rules <- treatment
@@ -11,7 +11,8 @@
     if (!is.null(treatment$plant)) plant <- treatment$plant
     if (!is.null(treatment$prevent_establishment)) prevent <- treatment$prevent_establishment
   }
-  if (!is.character(plant) || anyNA(plant) || any(!plant %in% species))
+  if (!is.character(plant) || anyNA(plant) ||
+      any(!nzchar(plant)) || (!is.null(species) && any(!plant %in% species)))
     stop("plant must contain known species names.", call. = FALSE)
   if (!is.logical(prevent) || length(prevent) != 1L || is.na(prevent))
     stop("prevent_establishment must be TRUE or FALSE.", call. = FALSE)

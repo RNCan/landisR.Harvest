@@ -47,11 +47,58 @@ harvest_step <- function(simulation, topology, prescriptions, rules_by_prescript
                    damage_history = damage_history, progress = progress)
 }
 
+.harvest_check_treatment_names <- function(rules_by_prescription) {
+  if (!is.list(rules_by_prescription) || is.null(names(rules_by_prescription)) ||
+      anyNA(names(rules_by_prescription)) || any(!nzchar(names(rules_by_prescription))) ||
+      anyDuplicated(names(rules_by_prescription)))
+    stop("rules_by_prescription doit \xeatre une liste de traitements nomm\xe9s.", call. = FALSE)
+}
+
+.harvest_validate_treatments <- function(prescriptions, rules_by_prescription, species = NULL) {
+  active <- prescriptions$fraction > 0
+  single <- prescriptions$repeat_type %in% "SingleRepeat"
+  names_to_validate <- unique(c(as.character(prescriptions$prescription[active]),
+    if (any(single)) paste0(prescriptions$prescription[single], "(1)")))
+  for (name in names_to_validate) {
+    if (!name %in% names(rules_by_prescription))
+      stop("Traitement manquant pour la prescription ", name, ".", call. = FALSE)
+    .harvest_treatment(rules_by_prescription[[name]], species)
+  }
+}
+
+harvest_build <- function(timestep = NULL, management, prescriptions, rules_by_prescription) {
+  if (!is.null(timestep)) {
+    if (length(timestep) != 1L)
+      stop("timestep must be one positive whole number of years.", call. = FALSE)
+    timestep <- .h04_integer(timestep, "timestep")
+  }
+  .harvest_check_management_columns(management)
+  prescriptions <- .harvest_validate_prescriptions(prescriptions)
+  .harvest_check_treatment_names(rules_by_prescription)
+  .harvest_validate_treatments(prescriptions, rules_by_prescription)
+  structure(list(management = management, prescriptions = prescriptions,
+                 rules_by_prescription = rules_by_prescription, timestep = timestep),
+            class = "landisR_harvest_parameters")
+}
+
 harvest_extension <- function(management, prescriptions, rules_by_prescription,
                               timestep = NULL, seed = NULL, rng_offset = 0,
                               allocation_mode = c("corrected", "landis_compatible"),
-                              damage_history = NULL) {
+                              damage_history = NULL, parameters = NULL) {
   allocation_mode <- match.arg(allocation_mode)
+  if (!is.null(parameters)) {
+    if (!inherits(parameters, "landisR_harvest_parameters"))
+      stop("Use harvest_build() or harvest_read() to create Harvest parameters.", call. = FALSE)
+    if (!missing(management) || !missing(prescriptions) ||
+        !missing(rules_by_prescription) || !missing(timestep))
+      stop("Supply either parameters or the Harvest tables and timestep.", call. = FALSE)
+    management <- parameters$management
+    prescriptions <- parameters$prescriptions
+    rules_by_prescription <- parameters$rules_by_prescription
+    timestep <- parameters$timestep
+    # The extension closures retain the unpacked tables for checkpoints.
+    parameters <- NULL
+  }
   force(management)
   force(prescriptions)
   force(rules_by_prescription)
@@ -60,10 +107,7 @@ harvest_extension <- function(management, prescriptions, rules_by_prescription,
   force(rng_offset)
   force(damage_history)
   landis_order <- .harvest_native_economic_order(prescriptions, allocation_mode)
-  if (!is.list(rules_by_prescription) || is.null(names(rules_by_prescription)) ||
-      anyNA(names(rules_by_prescription)) || any(!nzchar(names(rules_by_prescription))) ||
-      anyDuplicated(names(rules_by_prescription)))
-    stop("rules_by_prescription doit \xeatre une liste de traitements nomm\xe9s.", call. = FALSE)
+  .harvest_check_treatment_names(rules_by_prescription)
 
   initialize <- function(simulation) {
     timer <- .harvest_timer("initialisation", simulation$year)
@@ -79,16 +123,8 @@ harvest_extension <- function(management, prescriptions, rules_by_prescription,
                                year = simulation$year, seed = harvest_seed, rng_offset = rng_offset,
                                allocation_mode = allocation_mode, harvest_timestep = interval)
     timer("validation_plan_initial")
-    active <- prescriptions$fraction > 0
-    single <- prescriptions$repeat_type %in% "SingleRepeat"
-    names_to_validate <- unique(c(as.character(prescriptions$prescription[active]),
-      if (any(single)) paste0(prescriptions$prescription[single], "(1)")))
     species <- as.character(landisR::landis_csr(simulation)$species)
-    for (name in names_to_validate) {
-      if (!name %in% names(rules_by_prescription))
-        stop("Traitement manquant pour la prescription ", name, ".", call. = FALSE)
-      .harvest_treatment(rules_by_prescription[[name]], species)
-    }
+    .harvest_validate_treatments(prescriptions, rules_by_prescription, species)
     timer("validation_traitements")
     timer()
     list(topology = topology, history = NULL, seed = harvest_seed,
